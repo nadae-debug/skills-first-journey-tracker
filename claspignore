@@ -1,0 +1,24 @@
+# clasp pushes only what's explicitly allowed below (deny-all, then
+# allow-list) so README.md, this file, .clasp.json.example, and anything
+# else that isn't a real Apps Script project file never gets pushed.
+**/**
+!appsscript.json
+!Code.gs
+!Config.gs
+!Util.gs
+!Auth.gs
+!SheetData.gs
+!Engagement.gs
+!Definitions.gs
+!Comments.gs
+!Opportunities.gs
+!Activity.gs
+!Settings.gs
+!Favorites.gs
+!Overrides.gs
+!Setup.gs
+!Seed.gs
+!Assets.gs
+!Index.html
+!Stylesheet.html
+!JavaScript.html

@@ -1,0 +1,1074 @@
+<script>
+/**
+ * Skills-First Journey Tracker — client app.
+ *
+ * Ported from the Claude Design prototype (SkillsFirstJourney.dc.html). The
+ * render code below is intentionally close to a line-for-line port of the
+ * prototype (per the design_handoff README: "recreate pixel-perfectly...
+ * keep the exact state variables and render code"). What changed is the
+ * DATA LAYER ONLY: everything that used to read/write localStorage or fetch
+ * a published CSV now calls a server function (Auth.gs / SheetData.gs /
+ * Activity.gs / Settings.gs / Favorites.gs / Overrides.gs / Code.gs) via
+ * google.script.run, so the Google Sheet is the single shared source of
+ * truth and auth/activity/roles are enforced server-side.
+ */
+(function () {
+  var h = React.createElement, F = React.Fragment;
+
+  var DEFAULT_STAGES = ["Hasn't begun the Journey", "Starting the Journey", "On the Journey", "Leading the Journey"];
+  var DEFAULT_CATS = [
+    { key: 'laborMarket', label: 'Labor Market-shaping' },
+    { key: 'aiHiring', label: 'AI-driven Hiring' },
+    { key: 'riskCompliance', label: 'Risk & Compliance' },
+    { key: 'internalMobility', label: 'Internal Mobility & Reskilling' },
+    { key: 'vendorEcosystem', label: 'Vendor & Ecosystem Influence' },
+    { key: 'narrative', label: 'Narrative Normalization' },
+  ];
+
+  class App extends React.Component {
+    get STAGES() { return (this.state.stages && this.state.stages.length) ? this.state.stages : DEFAULT_STAGES; }
+    get CATS() { return (this.state.categoryKeys && this.state.categoryKeys.length) ? this.state.categoryKeys : DEFAULT_CATS; }
+    get DEFS() { return this.state.definitions || []; }
+    get RES() { return this.state.resources || { universalMenu: [], turnkey: [], exclusive: [] }; }
+    get ENG() { return this.state.engagement || []; }
+
+    stageDef(stage) { const d = this.DEFS.find(x => x.defType === 'Journey Definition' && x.category === stage); return d ? d.definition : ''; }
+    catStageDef(catLabel, stage) {
+      const map = { 'Labor Market-shaping': 'Labor Market-shaping Behavior' };
+      const dt = map[catLabel] || catLabel;
+      const d = this.DEFS.find(x => x.defType === dt && x.category === stage);
+      return d ? d.definition : '';
+    }
+    stageColor(s) {
+      return {
+        "Hasn't begun the Journey": "#9aa0b4",
+        "Starting the Journey": "#ffae32",
+        "On the Journey": "#56adde",
+        "Leading the Journey": "#8c4799",
+      }[s] || "#9aa0b4";
+    }
+    stageShort(s) {
+      return {
+        "Hasn't begun the Journey": "Hasn't begun",
+        "Starting the Journey": "Starting",
+        "On the Journey": "On the journey",
+        "Leading the Journey": "Leading",
+      }[s] || s;
+    }
+
+    norm(c) {
+      const cats = c.categories || {};
+      (this.CATS).forEach(k => { if (!cats[k.key]) cats[k.key] = { cls: this.STAGES[0], why: "" }; });
+      return Object.assign({
+        id: c.id || ('c' + Math.random().toString(36).slice(2, 8)),
+        company: "", logo: "", ttpc: false, adCouncil: false,
+        overall: "", overallWhy: "", doneTogether: "", owner: "",
+        international: "", edgeFlags: "", assessmentDate: "", sources: [], readinessScore: null,
+        top10: false, top10Notes: "", pointsOfContact: [], engagementIdeas: [],
+        lastChangeDirection: "", lastReassessed: "", latestChangeSummary: "", previousAssessments: [],
+        board: [], industry: "", website: "", parentNote: "",
+      }, c, { categories: cats });
+    }
+
+    constructor(props) {
+      super(props);
+      this.token = '';
+      try { this.token = localStorage.getItem('sfj_token') || ''; } catch (e) {}
+      this.state = {
+        loading: true, bootError: '',
+        companies: [], engagement: [], definitions: [], resources: null,
+        stages: [], categoryKeys: [],
+        view: 'cards', q: '', membership: 'all', industryFilter: 'all',
+        stageFilter: {}, sort: { key: 'company', dir: 1 },
+        selectedId: null, editing: null, isNew: false, toast: '',
+        selected: {}, shareOpen: false, shareTo: '', shareMsg: '', shareDetail: 'summary',
+        page: 'journey', engQ: '', engSort: { key: 'total', dir: -1 }, engExpanded: {},
+        auth: null, admins: [], activity: [],
+        favorites: {}, showFav: false, sending: false,
+        settings: { title: 'Skills-First Journey Tracker', accent: '#8c4799' },
+        loginEmail: '', loginPass: '', naName: '', naEmail: '', naPass: '', dataText: '',
+        syncing: false, assessmentTab: 'current', engDetail: null, liveSync: null,
+        commentCounts: {}, comments: {}, commentDraft: '', commentsLoadingFor: null,
+        oppDrafts: {},
+      };
+      this.fileRef = React.createRef();
+    }
+
+    componentDidMount() { this.bootstrap(); }
+
+    // ---------- bootstrap / server bridge ----------
+    bootstrap() {
+      this.setState({ loading: true, bootError: '' });
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res.auth) { this.token = ''; try { localStorage.removeItem('sfj_token'); } catch (e) {} }
+          this.setState({
+            loading: false, auth: res.auth, companies: res.companies || [], engagement: res.engagement || [],
+            definitions: res.definitions || [], resources: res.resources, settings: res.settings || this.state.settings,
+            stages: res.stages || DEFAULT_STAGES, categoryKeys: res.categoryKeys || DEFAULT_CATS,
+            favorites: res.favorites || {}, admins: res.admins || [], activity: res.activity || [],
+            commentCounts: res.commentCounts || {},
+          });
+        })
+        .withFailureHandler(err => this.setState({ loading: false, bootError: (err && err.message) || String(err) }))
+        .api_bootstrap(this.token);
+    }
+    refreshFromSheet() {
+      this.setState({ syncing: true });
+      google.script.run
+        .withSuccessHandler(res => { this.setState({ companies: res.companies, engagement: res.engagement, syncing: false, liveSync: { ok: true, at: Date.now() } }); this.flash('Refreshed from the Google Sheet'); })
+        .withFailureHandler(err => { this.setState({ syncing: false, liveSync: { ok: false, at: Date.now(), error: (err && err.message) || String(err) } }); this.flash('Refresh failed — showing last-known data.'); })
+        .api_refresh(this.token);
+    }
+    refreshActivity() {
+      google.script.run.withFailureHandler(() => {}).withSuccessHandler(activity => this.setState({ activity })).api_getActivity(this.token);
+    }
+
+    track(action, target) {
+      if (!this.state.auth) return;
+      google.script.run.withFailureHandler(() => {}).api_track(this.token, action, target || '');
+    }
+    openCompany(id) { const c = this.state.companies.find(x => x.id === id); this.track('Viewed company', c ? c.company : id); this.setState({ selectedId: id, assessmentTab: 'current', commentDraft: '' }); this.loadComments(id); }
+    // ---------- comments (live, shared — stored in the "Comments" sheet tab, never localStorage) ----------
+    loadComments(id) {
+      this.setState({ commentsLoadingFor: id });
+      google.script.run
+        .withSuccessHandler(list => this.setState(s => ({ comments: Object.assign({}, s.comments, { [id]: list }), commentsLoadingFor: s.commentsLoadingFor === id ? null : s.commentsLoadingFor })))
+        .withFailureHandler(() => this.setState(s => ({ commentsLoadingFor: s.commentsLoadingFor === id ? null : s.commentsLoadingFor })))
+        .api_getComments(this.token, id);
+    }
+    addComment(id) {
+      const text = (this.state.commentDraft || '').trim();
+      if (!text) return;
+      google.script.run
+        .withSuccessHandler(res => this.setState(s => ({ comments: Object.assign({}, s.comments, { [id]: res.comments }), commentCounts: res.commentCounts, commentDraft: '' })))
+        .withFailureHandler(err => this.flash('Could not post comment: ' + ((err && err.message) || err)))
+        .api_addComment(this.token, id, text);
+    }
+    // ---------- priority prospect opportunities (live, shared — "Priority Prospect Opportunities" sheet tab) ----------
+    addOpportunity(id, companyName) {
+      const text = ((this.state.oppDrafts || {})[id] || '').trim();
+      if (!text) return;
+      google.script.run
+        .withSuccessHandler(res => this.setState(s => ({
+          companies: s.companies.map(c => c.id === id ? Object.assign({}, c, { engagementIdeas: res.engagementIdeas }) : c),
+          oppDrafts: Object.assign({}, s.oppDrafts, { [id]: '' }),
+        })))
+        .withFailureHandler(err => this.flash('Could not add opportunity: ' + ((err && err.message) || err)))
+        .api_addOpportunity(this.token, companyName, text);
+    }
+    downloadCompany(id) {
+      const c = this.state.companies.find(x => x.id === id); if (!c) return;
+      const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const cats = (this.CATS || []).map(k => { const cc = c.categories[k.key] || {}; if (!cc.cls && !cc.why) return ''; return '<div style="border:1px solid #e5e2ea;border-radius:10px;padding:12px 14px;margin:0 0 8px"><div style="font-weight:500">' + esc(k.label) + ' &middot; <span style="color:#8c4799">' + esc(cc.cls || '—') + '</span></div>' + (cc.why ? '<div style="font-size:13px;color:#4a4e60;margin-top:4px">' + esc(cc.why) + '</div>' : '') + '</div>'; }).join('');
+      const src = (c.sources || []).map((s, i) => (i + 1) + '. <a href="' + esc(s) + '" style="color:#8c4799">' + esc(s) + '</a>').join('<br>');
+      const board = (c.board || []).map(m => esc(m.name) + (m.title ? ' — ' + esc(m.title) : '') + (m.role ? ' (' + esc(m.role) + (m.ec ? ', Exec Committee' : '') + ')' : '')).join('<br>');
+      // Per project rule (CLAUDE.md): never include "Where things stand now", edge case
+      // flags, or account owner in anything shared/downloaded — omitted below on purpose.
+      const html = '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(c.company) + ' — Skills-First Journey</title></head>'
+        + '<body style="font-family:DM Sans,-apple-system,Segoe UI,Arial,sans-serif;max-width:720px;margin:32px auto;padding:0 16px;color:#0f153b;background:#fff">'
+        + '<div style="font-size:22px;font-weight:600;letter-spacing:-.02em">Opportunity<span style="color:#8c4799">@</span>Work</div>'
+        + '<div style="height:1px;background:#e5e2ea;margin:16px 0 24px"></div>'
+        + '<div style="color:#8c4799;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase">Skills-First Journey Tracker</div>'
+        + '<h1 style="font-weight:500;letter-spacing:-.03em;font-size:30px;margin:8px 0 12px">' + esc(c.company) + '</h1>'
+        + '<p style="font-size:14px;color:#4a4e60;margin:0 0 20px"><b style="color:#0f153b">' + esc(c.overall || 'Not yet assessed') + '</b>' + (c.industry ? ' &middot; ' + esc(c.industry) : '') + (c.ttpc ? ' &middot; TTPC Coalition partner' : '') + (c.adCouncil ? ' &middot; Ad Council board' : '') + (c.assessmentDate ? ' &middot; Assessed ' + esc(c.assessmentDate) : '') + '</p>'
+        + (c.overallWhy ? '<p style="font-size:15px;line-height:1.6">' + esc(c.overallWhy) + '</p>' : '')
+        + (cats ? '<h3 style="font-weight:500;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6f80">Dimension classifications</h3>' + cats : '')
+        + (c.doneTogether ? '<h3 style="font-weight:500;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6f80">What we’ve done together</h3><p style="font-size:15px;line-height:1.6">' + esc(c.doneTogether) + '</p>' : '')
+        + (board ? '<h3 style="font-weight:500;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6f80">Ad Council board</h3><p style="font-size:15px;line-height:1.6">' + board + '</p>' : '')
+        + (c.international ? '<h3 style="font-weight:500;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6f80">International context</h3><p style="font-size:15px;line-height:1.6">' + esc(c.international) + '</p>' : '')
+        + (src ? '<h3 style="font-weight:500;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6f80">Sources</h3><p style="font-size:13px;line-height:1.8">' + src + '</p>' : '')
+        + '<div style="height:1px;background:#e5e2ea;margin:24px 0 12px"></div><div style="font-size:12px;color:#9aa0b4">Opportunity@Work — Skills-First Journey Tracker</div>'
+        + '</body></html>';
+      const blob = new Blob([html], { type: 'text/html' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = c.company.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-skills-first.html'; a.click();
+      this.track('Downloaded company', c.company); this.flash('Downloaded ' + c.company);
+    }
+    isFav(id) { return !!(this.state.favorites && this.state.favorites[id]); }
+    toggleFavorite(id) {
+      const f = Object.assign({}, this.state.favorites);
+      if (f[id]) delete f[id]; else f[id] = true;
+      this.setState({ favorites: f });
+      google.script.run.withFailureHandler(() => {}).withSuccessHandler(res => this.setState({ favorites: res.favorites })).api_toggleFavorite(this.token, id);
+    }
+    sendEmail() {
+      const { rows, body } = this.shareText(this.state.shareDetail);
+      if (!rows.length) return;
+      const to = (this.state.shareTo || '').trim();
+      if (!to) { this.flash('Enter a recipient email address'); return; }
+      const msg = this.state.shareMsg.trim();
+      const subject = 'Skills-first journey — ' + rows.length + (rows.length === 1 ? ' company' : ' companies');
+      const text = (msg ? msg + '\n\n' : '') + body;
+      this.setState({ sending: true });
+      google.script.run
+        .withSuccessHandler(() => { this.setState({ sending: false, shareOpen: false, selected: {} }); this.flash('Email sent to ' + to); })
+        .withFailureHandler(err => { this.setState({ sending: false }); this.flash('Send failed (' + ((err && err.message) || err) + ') — opening a draft instead'); this.openEmail(); })
+        .api_sendEmail(this.token, to, subject, text);
+    }
+    doLogin() {
+      const { loginEmail, loginPass } = this.state;
+      if (!(loginEmail || '').trim() || !(loginPass || '').trim()) { this.flash('Enter your administrator email and password'); return; }
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res.ok) { this.flash(res.error || 'Sign-in failed'); return; }
+          this.token = res.token;
+          try { localStorage.setItem('sfj_token', this.token); } catch (e) {}
+          this.setState({ loginPass: '', page: 'journey' });
+          this.bootstrap();
+        })
+        .withFailureHandler(err => this.flash('Sign-in failed: ' + ((err && err.message) || err)))
+        .api_login(loginEmail, loginPass);
+    }
+    logout() {
+      google.script.run.withFailureHandler(() => {}).api_logout(this.token);
+      this.token = ''; try { localStorage.removeItem('sfj_token'); } catch (e) {}
+      this.setState({ auth: null, favorites: {}, showFav: false, loginPass: '', selectedId: null, editing: null, page: 'journey' });
+    }
+    addAdmin() {
+      const { naName, naEmail, naPass } = this.state;
+      if (!(naName || '').trim() || !(naEmail || '').trim() || !(naPass || '').trim()) { this.flash('Fill in name, email, and password'); return; }
+      google.script.run
+        .withSuccessHandler(res => { this.setState({ admins: res.admins, naName: '', naEmail: '', naPass: '' }); this.flash('Administrator added'); })
+        .withFailureHandler(err => this.flash((err && err.message) || String(err)))
+        .api_addAdmin(this.token, naName, naEmail, naPass);
+    }
+    removeAdmin(email) {
+      google.script.run
+        .withSuccessHandler(res => { this.setState({ admins: res.admins }); this.flash('Administrator removed'); })
+        .withFailureHandler(err => this.flash((err && err.message) || String(err)))
+        .api_removeAdmin(this.token, email);
+    }
+    clearActivity() {
+      if (!window.confirm('Clear all activity history?')) return;
+      google.script.run
+        .withSuccessHandler(() => { this.setState({ activity: [] }); this.flash('Activity history cleared'); })
+        .withFailureHandler(err => this.flash((err && err.message) || String(err)))
+        .api_clearActivity(this.token);
+    }
+    setSetting(patch) {
+      this.setState({ settings: Object.assign({}, this.state.settings, patch) });
+      google.script.run
+        .withSuccessHandler(res => this.setState({ settings: res.settings }))
+        .withFailureHandler(err => this.flash('Setting failed: ' + ((err && err.message) || err)))
+        .api_setSetting(this.token, patch);
+    }
+    applyDataText() {
+      let arr;
+      try { arr = JSON.parse(this.state.dataText); if (!Array.isArray(arr)) throw new Error('data must be a JSON array'); }
+      catch (e) { this.flash('Invalid JSON: ' + e.message); return; }
+      google.script.run
+        .withSuccessHandler(res => { this.setState({ companies: res.companies }); this.flash('Database updated (' + res.count + ' companies)'); })
+        .withFailureHandler(err => this.flash('Update failed: ' + ((err && err.message) || err)))
+        .api_importCompanies(this.token, arr);
+    }
+
+    flash(msg) { this.setState({ toast: msg }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 2800); }
+    industries() { return Array.from(new Set(this.state.companies.map(c => c.industry).filter(Boolean))).sort(); }
+    engFiltered() {
+      const term = this.state.engQ.trim().toLowerCase();
+      const s = this.state.engSort;
+      let out = this.ENG.filter(e => !term || e.company.toLowerCase().includes(term));
+      out = out.slice().sort((a, b) => {
+        let av = a[s.key], bv = b[s.key];
+        if (typeof av === 'string') { av = av.toLowerCase(); bv = (bv || '').toLowerCase(); }
+        if (av < bv) return -1 * s.dir; if (av > bv) return 1 * s.dir; return 0;
+      });
+      return out;
+    }
+
+    filtered() {
+      const { companies, q, membership, industryFilter, stageFilter, sort } = this.state;
+      const activeStages = Object.keys(stageFilter).filter(k => stageFilter[k]);
+      const term = q.trim().toLowerCase();
+      let out = companies.filter(c => {
+        if (membership === 'ttpc' && !c.ttpc) return false;
+        if (membership === 'adcouncil' && !c.adCouncil) return false;
+        if (industryFilter !== 'all' && c.industry !== industryFilter) return false;
+        if (this.state.showFav && !(this.state.favorites && this.state.favorites[c.id])) return false;
+        if (activeStages.length) { const ok = activeStages.includes(c.overall) || (activeStages.includes('__none') && !c.overall); if (!ok) return false; }
+        if (term) {
+          const hay = [c.company, c.industry, c.overallWhy, c.doneTogether, (c.board || []).map(m => m.name + ' ' + m.title).join(' ')].join(' ').toLowerCase();
+          if (!hay.includes(term)) return false;
+        }
+        return true;
+      });
+      const dir = sort.dir;
+      out = out.slice().sort((a, b) => {
+        let av, bv;
+        if (sort.key === 'overall') { av = this.STAGES.indexOf(a.overall); bv = this.STAGES.indexOf(b.overall); }
+        else { av = (a[sort.key] || '').toString().toLowerCase(); bv = (b[sort.key] || '').toString().toLowerCase(); }
+        if (av < bv) return -1 * dir; if (av > bv) return 1 * dir; return 0;
+      });
+      return out;
+    }
+
+    // ---------- selection ----------
+    toggleSelect(id) { this.setState(s => ({ selected: Object.assign({}, s.selected, { [id]: !s.selected[id] }) })); }
+    selectAll(ids) { this.setState(s => { const n = Object.assign({}, s.selected); ids.forEach(i => n[i] = true); return { selected: n }; }); }
+    unselect(ids) { this.setState(s => { const n = Object.assign({}, s.selected); ids.forEach(i => delete n[i]); return { selected: n }; }); }
+    clearSelected() { this.setState({ selected: {} }); }
+    selectedIds() { return Object.keys(this.state.selected).filter(k => this.state.selected[k]); }
+
+    // ---------- share via email (client-side text building; excludes internal fields per CLAUDE.md) ----------
+    shareText(detail) {
+      const ids = this.selectedIds();
+      const rows = ids.map(id => this.state.companies.find(c => c.id === id)).filter(Boolean);
+      const lines = [];
+      rows.forEach(c => {
+        lines.push(c.company + ' — ' + c.overall);
+        const mem = [c.ttpc ? 'TTPC partner' : null, c.adCouncil ? 'Ad Council board' : null].filter(Boolean).join(', ');
+        if (mem) lines.push('  ' + mem);
+        if (detail === 'full') {
+          if (c.overallWhy) lines.push('  Why this classification: ' + c.overallWhy);
+          this.CATS.forEach(k => { const cc = c.categories[k.key] || {}; lines.push('  - ' + k.label + ': ' + cc.cls + (cc.why ? ' — ' + cc.why : '')); });
+          if (c.sources && c.sources.length) lines.push('  Sources: ' + c.sources.join('  |  '));
+        }
+        lines.push('');
+      });
+      return { rows, body: lines.join('\n') };
+    }
+    openEmail() {
+      const { rows, body } = this.shareText(this.state.shareDetail);
+      if (!rows.length) return;
+      const msg = this.state.shareMsg.trim();
+      const subject = 'Skills-first journey — ' + rows.length + (rows.length === 1 ? ' company' : ' companies');
+      const full = (msg ? msg + '\n\n' : '') + body;
+      const to = this.state.shareTo.trim();
+      const enc = encodeURIComponent(full);
+      if (enc.length > 1800) {
+        if (navigator.clipboard) navigator.clipboard.writeText(full).catch(() => {});
+        const shortBody = (msg ? msg + '\n\n' : '') + rows.map(c => '• ' + c.company + ' — ' + c.overall).join('\n') + '\n\n(Full details copied to your clipboard — paste them into the email body.)';
+        window.location.href = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(shortBody);
+        this.flash('Email opened — full details copied to clipboard');
+      } else {
+        window.location.href = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent(subject) + '&body=' + enc;
+        this.flash('Opening your email client…');
+      }
+      this.setState({ shareOpen: false });
+    }
+    copyShare() {
+      const { rows, body } = this.shareText(this.state.shareDetail);
+      if (!rows.length) return;
+      const msg = this.state.shareMsg.trim();
+      const text = (msg ? msg + '\n\n' : '') + body;
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => this.flash('Copied ' + rows.length + ' companies to clipboard')).catch(() => this.flash('Copy failed — try Open email'));
+      else this.flash('Clipboard not available');
+    }
+
+    // ---------- mutations (write through to the Sheet via SheetData.gs) ----------
+    blank() { return this.norm({ company: '', overall: this.STAGES[0] }); }
+    startAdd() { this.setState({ editing: this.blank(), isNew: true, selectedId: null }); }
+    startEdit(c) { this.setState({ editing: JSON.parse(JSON.stringify(c)), isNew: false }); }
+    cancelEdit() { this.setState({ editing: null }); }
+    setEdit(patch) { this.setState(s => ({ editing: Object.assign({}, s.editing, patch) })); }
+    setEditCat(key, patch) {
+      this.setState(s => {
+        const cats = Object.assign({}, s.editing.categories);
+        cats[key] = Object.assign({}, cats[key], patch);
+        return { editing: Object.assign({}, s.editing, { categories: cats }) };
+      });
+    }
+    saveForm() {
+      const e = this.state.editing;
+      if (!e.company.trim()) { this.flash('Company name is required'); return; }
+      google.script.run
+        .withSuccessHandler(res => { this.setState({ companies: res.companies, editing: null, selectedId: res.savedId }); this.flash(this.state.isNew ? 'Company added' : 'Changes saved'); })
+        .withFailureHandler(err => this.flash('Save failed: ' + ((err && err.message) || err)))
+        .api_saveCompany(this.token, e);
+    }
+    remove(id) {
+      if (!window.confirm('Delete this company? This removes its row from the Google Sheet.')) return;
+      google.script.run
+        .withSuccessHandler(res => { this.setState({ companies: res.companies, selectedId: null, editing: null }); this.flash('Company deleted'); })
+        .withFailureHandler(err => this.flash('Delete failed: ' + ((err && err.message) || err)))
+        .api_deleteCompany(this.token, id);
+    }
+
+    // ---------- CSV (export always excludes internal-only fields per CLAUDE.md) ----------
+    csvCols() {
+      const base = [
+        ['Company', c => c.company], ['Logo', c => c.logo],
+        ['TTPC Partner', c => c.ttpc ? 'Yes' : 'No'], ['Ad Council Board Member', c => c.adCouncil ? 'Yes' : 'No'],
+        ["What We've Done Together", c => c.doneTogether],
+        ['Top 10', c => c.top10 ? 'Yes' : 'No'], ['Top 10 Notes', c => c.top10Notes],
+        ['Points of Contact', c => (c.pointsOfContact || []).map(p => p.name + (p.title ? ' (' + p.title + ')' : '')).join(' | ')],
+        ['Engagement Ideas', c => (c.engagementIdeas || []).join(' | ')],
+        ['Last Change Direction', c => c.lastChangeDirection], ['Last Reassessed', c => c.lastReassessed], ['Latest Change Summary', c => c.latestChangeSummary],
+        ['Overall Journey Classification', c => c.overall], ['Overall Classification Reasoning', c => c.overallWhy],
+      ];
+      const cat = [];
+      this.CATS.forEach(k => {
+        cat.push([k.label + ' — Classification', c => (c.categories[k.key] || {}).cls || '']);
+        cat.push([k.label + ' — Reasoning', c => (c.categories[k.key] || {}).why || '']);
+      });
+      const tail = [
+        ['International Context', c => c.international], ['Assessment Date', c => c.assessmentDate],
+      ];
+      const src = [];
+      for (let i = 1; i <= 17; i++) src.push(['Source Link ' + i, c => (c.sources || [])[i - 1] || '']);
+      return base.concat(cat, tail, src);
+    }
+    exportCSV() {
+      const cols = this.csvCols();
+      const esc = v => { v = (v == null ? '' : String(v)); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      const rows = [cols.map(c => esc(c[0])).join(',')];
+      this.filtered().forEach(c => rows.push(cols.map(col => esc(col[1](c))).join(',')));
+      const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'skills-first-journey.csv'; a.click();
+      this.flash('Exported ' + this.filtered().length + ' companies to CSV');
+    }
+    parseCSV(text) {
+      const rows = []; let row = [], cur = '', q = false;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (q) { if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+        else {
+          if (ch === '"') q = true;
+          else if (ch === ',') { row.push(cur); cur = ''; }
+          else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+          else if (ch === '\r') {}
+          else cur += ch;
+        }
+      }
+      if (cur.length || row.length) { row.push(cur); rows.push(row); }
+      return rows.filter(r => r.length && r.some(x => x !== ''));
+    }
+    importCSV(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          let content = reader.result; if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+          const rows = this.parseCSV(content);
+          if (rows.length < 2) { this.flash('No rows found in CSV'); return; }
+          const head = rows[0].map(h => h.trim());
+          const idx = name => head.findIndex(h => h.toLowerCase() === name.toLowerCase());
+          const yes = v => /^(yes|true|1|y)$/i.test((v || '').trim());
+          const get = (r, name) => { const i = idx(name); return i >= 0 ? (r[i] || '').trim() : ''; };
+          const out = rows.slice(1).map(r => {
+            const cats = {};
+            this.CATS.forEach(k => { cats[k.key] = { cls: get(r, k.label + ' — Classification') || this.STAGES[0], why: get(r, k.label + ' — Reasoning') }; });
+            const sources = [];
+            for (let i = 1; i <= 17; i++) { const v = get(r, 'Source Link ' + i); if (v) sources.push(v); }
+            return this.norm({
+              company: get(r, 'Company'), logo: get(r, 'Logo'),
+              ttpc: yes(get(r, 'TTPC Partner')), adCouncil: yes(get(r, 'Ad Council Board Member')),
+              doneTogether: get(r, "What We've Done Together"),
+              overall: get(r, 'Overall Journey Classification') || this.STAGES[0], overallWhy: get(r, 'Overall Classification Reasoning'),
+              categories: cats, international: get(r, 'International Context'),
+              assessmentDate: get(r, 'Assessment Date'), sources,
+            });
+          }).filter(c => c.company);
+          if (!out.length) { this.flash('No valid company rows found'); return; }
+          google.script.run
+            .withSuccessHandler(res => { this.setState({ companies: res.companies, selected: {} }); this.flash('Imported ' + res.count + ' companies'); })
+            .withFailureHandler(err => this.flash('Import failed: ' + ((err && err.message) || err)))
+            .api_importCompanies(this.token, out);
+        } catch (e) { this.flash('Could not parse CSV: ' + e.message); }
+      };
+      reader.readAsText(file);
+    }
+
+    // ================= RENDER =================
+    render() {
+      const st = this.state;
+      if (st.loading) {
+        return h('div', { style: { minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b6f80', fontSize: '.95rem' } }, 'Loading…');
+      }
+      if (st.bootError) {
+        return h('div', { style: { minHeight: '60vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', padding: '2rem', textAlign: 'center' } },
+          h('p', { style: { color: '#e03c32', maxWidth: '32rem' } }, 'Could not load the app: ' + st.bootError),
+          h('button', { onClick: () => this.bootstrap(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.9rem', fontWeight: 500, padding: '.6rem 1.4rem', borderRadius: '100vw', border: '1.5px solid #8c4799', background: '#8c4799', color: '#fff' } }, 'Retry'));
+      }
+      const ACC = (st.settings && st.settings.accent) || '#8c4799';
+      const isAdmin = !!(st.auth && st.auth.role === 'admin');
+      if (!st.auth) return this.loginScreen(ACC);
+      const companies = st.companies;
+      const list = this.filtered();
+      const selIds = this.selectedIds();
+      const linkify = (text, sources) => {
+        if (!text) return text;
+        const parts = String(text).split(/(\[\d+\])/g);
+        return parts.map((p, i) => {
+          const m = p.match(/^\[(\d+)\]$/);
+          if (m) { const url = (sources || [])[+m[1] - 1]; if (url) return h('a', { key: i, href: url, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { textDecoration: 'none', fontWeight: 600 } }, p); }
+          return p;
+        });
+      };
+      const tip = (child, text, key) => text ? h('span', { key: key, className: 'sfj-tip', tabIndex: 0, style: { display: 'inline-flex', alignItems: 'center', gap: '.35rem' } }, child, h('span', { className: 'sfj-tipbox' }, text)) : child;
+      const engById = {}; this.ENG.forEach(e => { if (e.id) engById[e.id] = e; });
+      const globe = h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', style: { flex: '0 0 auto' } }, h('circle', { cx: 12, cy: 12, r: 9 }), h('path', { d: 'M3 12h18' }), h('path', { d: 'M12 3c2.6 2.7 2.6 15.3 0 18c-2.6-2.7-2.6-15.3 0-18z' }));
+      const engBadge = id => { const e = engById[id]; if (!e) return null; return h('span', { title: e.total + ' website visit' + (e.total === 1 ? '' : 's'), style: { display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, color: '#8c4799', background: '#f3e9f5', border: '1.5px solid #d9bfe0', borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, globe, e.total); };
+      const commentIcon = h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flex: '0 0 auto' } }, h('path', { d: 'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z' }));
+      const commentBadge = id => { const n = st.commentCounts[id]; if (!n) return null; return h('span', { title: n + ' comment' + (n === 1 ? '' : 's'), style: { display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, color: '#0f153b', background: '#eef0f4', border: '1.5px solid #cfd3dd', borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, commentIcon, n); };
+      const favCount = Object.keys(st.favorites || {}).length;
+      const star = (filled, sz) => h('svg', { width: sz || 18, height: sz || 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.4, strokeLinecap: 'round', style: { flex: '0 0 auto' } }, h('path', { d: 'M12 3.4V20.6 M4.55 7.7L19.45 16.3 M4.55 16.3L19.45 7.7' }));
+      const favBtn = id => h('button', { onClick: e => { e.stopPropagation(); this.toggleFavorite(id); }, title: this.isFav(id) ? 'Remove from favorites' : 'Add to favorites', style: { cursor: 'pointer', border: 'none', background: 'transparent', padding: '.15rem', lineHeight: 0, color: this.isFav(id) ? '#8c4799' : '#c3c6d0' } }, star(this.isFav(id), 18));
+
+      const badge = (stage, small, tipText) => {
+        const col = stage ? this.stageColor(stage) : '#9aa0b4';
+        const pill = h('span', {
+          style: {
+            display: 'inline-flex', alignItems: 'center', gap: '.4rem', whiteSpace: 'nowrap',
+            padding: small ? '.15rem .55rem' : '.3rem .7rem', borderRadius: '100vw',
+            fontSize: small ? '.75rem' : '.8125rem', fontWeight: 500, lineHeight: 1.2, cursor: stage ? 'help' : 'default',
+            background: stage ? col + '22' : '#eef0f4', color: stage ? '#0f153b' : '#6b6f80', border: '1.5px solid ' + (stage ? col : '#cfd3dd'),
+          }
+        }, h('span', { style: { width: '.5rem', height: '.5rem', borderRadius: '100vw', background: col, flex: '0 0 auto' } }), stage ? this.stageShort(stage) : 'Not yet assessed');
+        return stage ? tip(pill, tipText !== undefined ? tipText : this.stageDef(stage)) : pill;
+      };
+
+      const avatar = (c, size) => {
+        const px = size || 44;
+        const initials = (c.company || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+        return h('span', { style: { position: 'relative', width: px, height: px, flex: '0 0 auto', borderRadius: '.5rem', background: '#0f153b', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: px * 0.32, overflow: 'hidden' } },
+          initials,
+          c.logo ? h('img', { src: c.logo, alt: c.company, loading: 'lazy', onError: e => { e.target.style.display = 'none'; }, style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#fff', padding: px > 40 ? '4px' : '2px' } }) : null);
+      };
+
+      const tag = (label, color) => h('span', { style: { fontSize: '.72rem', fontWeight: 600, letterSpacing: '.02em', textTransform: 'uppercase', padding: '.2rem .55rem', borderRadius: '100vw', border: '1.5px solid ' + color, color: color } }, label);
+
+      const check = id => h('input', { type: 'checkbox', checked: !!st.selected[id], onClick: e => e.stopPropagation(), onChange: e => { e.stopPropagation(); this.toggleSelect(id); }, style: { width: '1.1rem', height: '1.1rem', cursor: 'pointer', accentColor: '#8c4799', flex: '0 0 auto' } });
+
+      // ---- HERO ----
+      const hero = h('section', { className: 'section u-theme-light', style: { paddingTop: '3.5rem', paddingBottom: '2rem' } },
+        h('div', { className: 'u-container' },
+          h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Coalition intelligence'),
+          h('h1', { className: 'u-text-style-h2', style: { margin: 0, maxWidth: '20ch' } }, 'Where our companies stand on the skills-first journey'),
+          h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '56ch' } },
+            'Track, filter, and compare the skills-first progress of Tear the Paper Ceiling Coalition partners and Ad Council board companies across six dimensions — then select any set to share by email.')));
+
+      // ---- KPIs ----
+      const kpi = (value, label, color) => h('div', { className: 'card', style: { padding: '1.5rem', background: '#fff' } },
+        h('div', { className: 'u-text-style-h3 u-weight-medium', style: { color: color || '#0f153b', lineHeight: 1 } }, value),
+        h('div', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.4rem' } }, label));
+      const count = s => companies.filter(c => c.overall === s).length;
+      const kpis = h('div', { className: 'u-grid-column-4', style: { marginTop: '2rem' } },
+        kpi(companies.length, 'Companies tracked'),
+        kpi(companies.filter(c => c.overall).length, 'Assessed on the journey', '#8c4799'),
+        kpi(companies.filter(c => c.ttpc).length, 'TTPC Coalition partners', '#8c4799'),
+        kpi(companies.filter(c => c.adCouncil).length, 'Ad Council board companies', '#e87722'));
+
+      const maxStage = Math.max(1, ...this.STAGES.map(count));
+      const stageChart = h('div', { className: 'card', style: { padding: '1.75rem', background: '#fff' } },
+        h('div', { className: 'u-text-style-small u-weight-semi-bold', style: { marginBottom: '1.1rem' } }, 'Overall journey classification'),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.85rem' } },
+          this.STAGES.slice().reverse().map(s => h('div', { key: s, style: { display: 'flex', alignItems: 'center', gap: '.9rem' } },
+            h('div', { style: { width: '8rem', flex: '0 0 auto', fontSize: '.82rem', color: '#0f153b' } }, this.stageShort(s)),
+            h('div', { style: { flex: 1, background: '#f0f0ee', borderRadius: '100vw', height: '1.4rem', overflow: 'hidden' } },
+              h('div', { style: { width: (count(s) / maxStage * 100) + '%', minWidth: count(s) ? '1.4rem' : 0, height: '100%', background: this.stageColor(s), borderRadius: '100vw' } })),
+            h('div', { style: { width: '2rem', textAlign: 'right', fontWeight: 600, fontSize: '.9rem' } }, count(s))))));
+
+      const catRow = k => {
+        const total = companies.filter(c => c.overall).length || 1;
+        const segs = this.STAGES.map(s => ({ s, n: companies.filter(c => (c.categories[k.key] || {}).cls === s).length }));
+        return h('div', { key: k.key, style: { display: 'flex', alignItems: 'center', gap: '.9rem' } },
+          h('div', { style: { width: '13rem', flex: '0 0 auto', fontSize: '.82rem', color: '#0f153b' } }, k.label),
+          h('div', { style: { flex: 1, display: 'flex', height: '1.25rem', borderRadius: '100vw', overflow: 'hidden', background: '#f0f0ee' } },
+            segs.map(seg => seg.n ? h('div', { key: seg.s, title: this.stageShort(seg.s) + ': ' + seg.n, style: { width: (seg.n / total * 100) + '%', background: this.stageColor(seg.s) } }) : null)));
+      };
+      const catChart = h('div', { className: 'card', style: { padding: '1.75rem', background: '#fff' } },
+        h('div', { className: 'u-hflex-between-center', style: { marginBottom: '1.1rem', flexWrap: 'wrap', gap: '.5rem' } },
+          h('div', { className: 'u-text-style-small u-weight-semi-bold' }, 'Readiness by dimension'),
+          h('div', { style: { display: 'flex', gap: '.8rem', flexWrap: 'wrap' } },
+            this.STAGES.map(s => h('span', { key: s, style: { display: 'inline-flex', alignItems: 'center', gap: '.35rem', fontSize: '.72rem', color: '#0f153b' } },
+              h('span', { style: { width: '.7rem', height: '.7rem', borderRadius: '2px', background: this.stageColor(s) } }), this.stageShort(s))))),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.7rem' } }, this.CATS.map(catRow)));
+
+      const dashboard = h('section', { className: 'section u-theme-light-2', style: { paddingTop: '2.5rem', paddingBottom: '3rem' } },
+        h('div', { className: 'u-container' }, kpis,
+          h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1.25fr', gap: '1.5rem', marginTop: '1.5rem', alignItems: 'start' } }, stageChart, catChart)));
+
+      // ---- CONTROLS ----
+      const seg = (val, cur, on, label) => h('button', { key: val, onClick: on, style: { border: 'none', cursor: 'pointer', padding: '.5rem 1rem', borderRadius: '100vw', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, background: cur ? '#0f153b' : 'transparent', color: cur ? '#fff' : '#0f153b' } }, label);
+      const segGroup = children => h('div', { style: { display: 'inline-flex', gap: '.25rem', padding: '.25rem', background: '#f0f0ee', borderRadius: '100vw' } }, children);
+      const actionBtn = (label, on, primary) => h('button', {
+        onClick: on, style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid ' + (primary ? ACC : 'rgba(28,28,28,.2)'), background: primary ? ACC : '#fff', color: primary ? '#fff' : '#0f153b', transition: 'background .2s,border-color .2s,color .2s', whiteSpace: 'nowrap' },
+        onMouseEnter: e => { if (primary) { e.currentTarget.style.background = '#0f153b'; e.currentTarget.style.borderColor = '#0f153b'; } else e.currentTarget.style.borderColor = ACC; },
+        onMouseLeave: e => { if (primary) { e.currentTarget.style.background = ACC; e.currentTarget.style.borderColor = ACC; } else e.currentTarget.style.borderColor = 'rgba(28,28,28,.2)'; },
+      }, label);
+      const selectStyle = { padding: '.6rem 1rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.15)', fontFamily: 'inherit', fontSize: '.85rem', background: '#fff', cursor: 'pointer', maxWidth: '14rem' };
+
+      const stageFilterChips = h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap' } },
+        this.STAGES.concat(['__none']).map(s => { const active = !!st.stageFilter[s]; const col = s === '__none' ? '#9aa0b4' : this.stageColor(s); const label = s === '__none' ? 'Not yet assessed' : this.stageShort(s);
+          return h('button', { key: s, onClick: () => this.setState(x => ({ stageFilter: Object.assign({}, x.stageFilter, { [s]: !x.stageFilter[s] }) })),
+          style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 500, padding: '.3rem .7rem', borderRadius: '100vw', border: '1.5px solid ' + col, background: active ? col : 'transparent', color: active ? '#fff' : '#0f153b', display: 'inline-flex', alignItems: 'center', gap: '.4rem' } },
+          h('span', { style: { width: '.5rem', height: '.5rem', borderRadius: '100vw', background: active ? '#fff' : col } }), label); }));
+
+      const controls = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.75rem' } },
+        h('div', { className: 'u-hflex-between-center', style: { gap: '1rem', flexWrap: 'wrap' } },
+          h('div', { style: { display: 'flex', gap: '.75rem', alignItems: 'center', flexWrap: 'wrap', flex: 1 } },
+            h('div', { style: { position: 'relative', flex: '1 1 15rem', maxWidth: '22rem' } },
+              h('input', { type: 'search', value: st.q, placeholder: 'Search companies, owners, notes…', onChange: e => this.setState({ q: e.target.value }), style: { width: '100%', padding: '.6rem 1rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.15)', fontFamily: 'inherit', fontSize: '.9rem', background: '#fff' } })),
+            h('select', { value: st.membership, onChange: e => this.setState({ membership: e.target.value }), style: selectStyle }, h('option', { value: 'all' }, 'All memberships'), h('option', { value: 'ttpc' }, 'TTPC partners'), h('option', { value: 'adcouncil' }, 'Ad Council board')),
+            h('select', { value: st.industryFilter, onChange: e => this.setState({ industryFilter: e.target.value }), style: selectStyle }, [h('option', { key: 'all', value: 'all' }, 'All industries')].concat(this.industries().map(o => h('option', { key: o, value: o }, o))))),
+          h('div', { style: { display: 'flex', gap: '.6rem', flexWrap: 'wrap' } },
+            isAdmin ? actionBtn('+ Add company', () => this.startAdd(), true) : null,
+            isAdmin ? actionBtn('Import CSV', () => this.fileRef.current && this.fileRef.current.click()) : null,
+            actionBtn('Export CSV', () => { this.track('Exported CSV', this.filtered().length + ' companies'); this.exportCSV(); }))),
+        h('div', { className: 'u-hflex-between-center', style: { gap: '1rem', flexWrap: 'wrap' } },
+          stageFilterChips,
+          h('div', { style: { display: 'flex', gap: '1rem', alignItems: 'center' } },
+            h('button', { onClick: () => this.setState({ showFav: !st.showFav }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.42rem .8rem', borderRadius: '100vw', border: '1.5px solid ' + (st.showFav ? '#8c4799' : 'rgba(28,28,28,.2)'), background: st.showFav ? '#f3e9f5' : '#fff', color: '#0f153b', display: 'inline-flex', alignItems: 'center', gap: '.35rem' } }, h('span', { style: { color: '#8c4799', lineHeight: 0 } }, star(true, 14)), 'Favorites' + (favCount ? ' (' + favCount + ')' : '')),
+            h('span', { className: 'u-text-style-small u-color-faded' }, list.length + ' shown'),
+            segGroup([
+              seg('cards', st.view === 'cards', () => this.setState({ view: 'cards' }), 'Cards'),
+              seg('table', st.view === 'table', () => this.setState({ view: 'table' }), 'Table'),
+              seg('stage', st.view === 'stage', () => this.setState({ view: 'stage' }), 'By stage'),
+            ]))));
+
+      // ---- CARDS ----
+      const card = c => { const isSel = !!st.selected[c.id]; return h('div', { key: c.id, className: 'card sfj-card', onClick: () => this.openCompany(c.id),
+        style: { padding: '1.5rem', paddingTop: '1.25rem', background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '.85rem', borderTop: '4px solid ' + this.stageColor(c.overall), borderColor: isSel ? '#8c4799' : undefined, boxShadow: isSel ? '0 0 0 2px #8c4799' : undefined } },
+        h('div', { style: { display: 'flex', gap: '.9rem', alignItems: 'flex-start' } }, avatar(c, 48),
+          h('div', { style: { minWidth: 0, flex: 1 } },
+            h('div', { className: 'u-weight-medium', style: { lineHeight: 1.25, fontSize: '1.0625rem', letterSpacing: '-0.02em' } }, c.company),
+            c.industry ? h('div', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.15rem' } }, c.industry) : null),
+          h('div', { onClick: e => e.stopPropagation(), style: { flex: '0 0 auto', paddingTop: '.05rem', display: 'flex', gap: '.35rem', alignItems: 'center' } }, favBtn(c.id), check(c.id))),
+        h('div', null, badge(c.overall)),
+        (c.board && c.board.length) ? h('div', { style: { fontSize: '.8rem', color: '#b5651d', display: 'flex', flexDirection: 'column', gap: '.15rem' } }, c.board.map((m, i) => h('span', { key: i }, '● ' + m.name + (m.title ? ' — ' + m.title : '')))) : null,
+        h('p', { className: 'u-text-style-small u-color-faded', style: { margin: 0, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, c.overallWhy || 'No status recorded yet.'),
+        h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginTop: 'auto', alignItems: 'center' } }, c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('Ad Council', '#e87722') : null, engBadge(c.id), commentBadge(c.id))); };
+      const cardsView = h('div', { className: 'u-grid-column-3' }, list.map(card));
+
+      // ---- TABLE ----
+      const allSel = list.length > 0 && list.every(c => st.selected[c.id]);
+      const th = (label, key, align) => h('th', { onClick: key ? () => this.setState(s => ({ sort: { key, dir: s.sort.key === key ? -s.sort.dir : 1 } })) : null,
+        style: { textAlign: align || 'left', padding: '.75rem 1rem', fontSize: '.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', cursor: key ? 'pointer' : 'default', whiteSpace: 'nowrap', userSelect: 'none' } },
+        label, key && st.sort.key === key ? h('span', { style: { color: '#8c4799' } }, st.sort.dir > 0 ? ' ↑' : ' ↓') : '');
+      const td = (child, extra) => h('td', { style: Object.assign({ padding: '.7rem 1rem', fontSize: '.875rem', borderTop: '1px solid rgba(28,28,28,.07)', verticalAlign: 'middle' }, extra) }, child);
+      const tableView = h('div', { className: 'card', style: { padding: 0, background: '#fff', overflowX: 'auto' } },
+        h('table', { style: { width: '100%', borderCollapse: 'collapse', minWidth: '48rem' } },
+          h('thead', null, h('tr', null,
+            h('th', { style: { padding: '.75rem 1rem', width: '1rem' } }, h('input', { type: 'checkbox', checked: allSel, onChange: e => e.target.checked ? this.selectAll(list.map(c => c.id)) : this.unselect(list.map(c => c.id)), style: { width: '1.1rem', height: '1.1rem', cursor: 'pointer', accentColor: '#8c4799' } })),
+            th('Company', 'company'), th('Membership'), th('Overall', 'overall'), th('Assessed', 'assessmentDate'))),
+          h('tbody', null, list.map(c => h('tr', { key: c.id, className: 'sfj-row', onClick: () => this.openCompany(c.id), style: { cursor: 'pointer', background: st.selected[c.id] ? '#faf5fb' : undefined } },
+            td(h('div', { onClick: e => e.stopPropagation() }, check(c.id))),
+            td(h('div', { style: { display: 'flex', alignItems: 'center', gap: '.6rem' } }, h('span', { onClick: e => e.stopPropagation(), style: { lineHeight: 0 } }, favBtn(c.id)), avatar(c, 32), h('span', { style: { fontWeight: 500 } }, c.company), engBadge(c.id), commentBadge(c.id))),
+            td(h('div', { style: { display: 'flex', gap: '.3rem' } }, c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('AC', '#e87722') : null)),
+            td(badge(c.overall, true)),
+            td(c.assessmentDate || '—'))))));
+
+      // ---- BY STAGE ----
+      const stageView = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', alignItems: 'start' } },
+        this.STAGES.slice().reverse().map(s => { const items = list.filter(c => c.overall === s);
+          return h('div', { key: s, style: { background: '#fff', borderRadius: '1rem', border: '1.5px solid rgba(28,28,28,.08)', overflow: 'hidden' } },
+            h('div', { style: { padding: '.9rem 1rem', borderTop: '4px solid ' + this.stageColor(s), display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+              h('span', { style: { fontWeight: 600, fontSize: '.9rem' } }, this.stageShort(s)), h('span', { style: { fontSize: '.8rem', color: '#6b6f80' } }, items.length)),
+            h('div', { style: { padding: '.75rem', display: 'flex', flexDirection: 'column', gap: '.6rem' } },
+              items.length ? items.map(c => h('div', { key: c.id, onClick: () => this.openCompany(c.id),
+                style: { cursor: 'pointer', background: st.selected[c.id] ? '#faf5fb' : '#f9f9f7', border: '1px solid ' + (st.selected[c.id] ? '#8c4799' : 'rgba(28,28,28,.06)'), borderRadius: '.6rem', padding: '.7rem', display: 'flex', gap: '.55rem', alignItems: 'center' } },
+                h('div', { onClick: e => e.stopPropagation() }, check(c.id)), avatar(c, 30),
+                h('div', { style: { minWidth: 0, flex: 1 } }, h('div', { style: { fontWeight: 500, fontSize: '.85rem', lineHeight: 1.3 } }, c.company), c.industry ? h('div', { style: { fontSize: '.75rem', color: '#6b6f80', marginTop: '.1rem' } }, c.industry) : null))) : h('div', { style: { padding: '1rem', fontSize: '.8rem', color: '#9aa0b4', textAlign: 'center' } }, 'None'))); }));
+
+      const viewEl = st.view === 'table' ? tableView : st.view === 'stage' ? stageView : cardsView;
+      const empty = h('div', { className: 'card', style: { padding: '3rem', textAlign: 'center', background: '#fff' } },
+        h('p', { className: 'u-text-style-large', style: { margin: 0 } }, 'No companies match your filters.'),
+        h('button', { onClick: () => this.setState({ q: '', membership: 'all', industryFilter: 'all', stageFilter: {} }), style: { marginTop: '1rem', cursor: 'pointer', background: 'none', border: 'none', color: '#8c4799', fontFamily: 'inherit', fontSize: '.9rem', textDecoration: 'underline' } }, 'Clear filters'));
+
+      const directory = h('section', { className: 'section u-theme-light', style: { paddingTop: '2.5rem', paddingBottom: selIds.length ? '6rem' : '2rem' } },
+        h('div', { className: 'u-container' }, controls, list.length ? viewEl : empty,
+          h('div', { style: { marginTop: '2rem', textAlign: 'center' } },
+            h('button', { onClick: () => this.refreshFromSheet(), style: { cursor: 'pointer', background: 'none', border: 'none', color: '#9aa0b4', fontFamily: 'inherit', fontSize: '.78rem', textDecoration: 'underline' } }, 'Refresh from Google Sheet'))));
+
+      // ---- DETAIL DRAWER ----
+      const sel = companies.find(c => c.id === st.selectedId);
+      const assessmentTab = st.assessmentTab || 'current';
+      const priorAssess = (sel && sel.previousAssessments && sel.previousAssessments.length) ? sel.previousAssessments[sel.previousAssessments.length - 1] : null;
+      const changesSinceLast = (sel && priorAssess) ? (() => {
+        const items = [];
+        if (priorAssess.classification && sel.overall && priorAssess.classification !== sel.overall) items.push({ label: 'Overall', from: priorAssess.classification, to: sel.overall });
+        this.CATS.forEach(k => { const prevCls = (priorAssess.categories && priorAssess.categories[k.key] && priorAssess.categories[k.key].cls) || ''; const curCls = (sel.categories[k.key] && sel.categories[k.key].cls) || ''; if (prevCls && curCls && prevCls !== curCls) items.push({ label: k.label, from: prevCls, to: curCls }); });
+        const scoreLine = (priorAssess.score != null && sel.readinessScore != null && priorAssess.score !== sel.readinessScore) ? (priorAssess.score.toFixed(2) + ' → ' + sel.readinessScore.toFixed(2) + ' (' + (sel.readinessScore - priorAssess.score >= 0 ? '+' : '') + (sel.readinessScore - priorAssess.score).toFixed(2) + ')') : '';
+        return { items, scoreLine, since: priorAssess.date };
+      })() : null;
+      const activeAssess = (() => {
+        if (!sel) return {};
+        if (assessmentTab === 'current' || !sel.previousAssessments) return { overall: sel.overall, overallWhy: sel.overallWhy, categories: sel.categories, sources: sel.sources, isCurrent: true };
+        const idx = parseInt(assessmentTab.replace('prev', ''), 10);
+        const p = sel.previousAssessments[idx] || {};
+        const delta = (p.score != null && sel.readinessScore != null) ? (p.score.toFixed(2) + ' → ' + sel.readinessScore.toFixed(2) + ' (' + (sel.readinessScore - p.score >= 0 ? '+' : '') + (sel.readinessScore - p.score).toFixed(2) + ')') : '';
+        return { overall: p.classification, overallWhy: p.summary, categories: p.categories || {}, sources: p.sources && p.sources.length ? p.sources : sel.sources, scoreDelta: delta, date: p.date, isCurrent: false };
+      })();
+      const field = (label, val) => val ? h('div', { style: { marginBottom: '1.1rem' } },
+        h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.3rem' } }, label),
+        h('div', { style: { fontSize: '.9rem', lineHeight: 1.5, color: '#0f153b', whiteSpace: 'pre-wrap' } }, val)) : null;
+
+      // Comments — live, shared thread stored in the "Comments" sheet tab (see Comments.gs).
+      const commentsSection = sel ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+        h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.6rem' } },
+          'Comments' + ((st.comments[sel.id] || []).length ? ' (' + st.comments[sel.id].length + ')' : '')),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.6rem', marginBottom: '.85rem' } },
+          st.commentsLoadingFor === sel.id ? h('div', { style: { fontSize: '.8rem', color: '#9aa0b4' } }, 'Loading…')
+            : (st.comments[sel.id] && st.comments[sel.id].length) ? st.comments[sel.id].map((c, i) => h('div', { key: i, style: { background: '#fff', border: '1px solid rgba(28,28,28,.08)', borderRadius: '.6rem', padding: '.6rem .8rem' } },
+              h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '.75rem', marginBottom: '.2rem' } },
+                h('span', { style: { fontWeight: 500, fontSize: '.82rem' } }, c.who),
+                h('span', { style: { fontSize: '.72rem', color: '#9aa0b4', whiteSpace: 'nowrap' } }, new Date(c.ts).toLocaleString())),
+              h('div', { style: { fontSize: '.85rem', color: '#0f153b', whiteSpace: 'pre-wrap' } }, c.text)))
+              : h('div', { style: { fontSize: '.8rem', color: '#9aa0b4' } }, 'No comments yet — be the first to leave one.')),
+        h('div', { style: { display: 'flex', gap: '.5rem', alignItems: 'flex-start' } },
+          h('textarea', { value: st.commentDraft, onChange: e => this.setState({ commentDraft: e.target.value }), placeholder: 'Add a comment…', rows: 2, style: { flex: 1, padding: '.55rem .8rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.85rem', resize: 'vertical', boxSizing: 'border-box' } }),
+          h('button', { onClick: () => this.addComment(sel.id), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid ' + ACC, background: ACC, color: '#fff', whiteSpace: 'nowrap' } }, 'Post'))) : null;
+
+      const drawer = sel ? h('div', { onClick: () => this.setState({ selectedId: null }), style: { position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(8,11,32,.82)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '2.5vh 1rem' }, className: 'sfj-fade' },
+        h('div', { onClick: e => e.stopPropagation(), className: 'sfj-pop', style: { width: 'min(920px, 96vw)', maxHeight: '95vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: '1rem', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,.45)' } },
+          h('div', { style: { flex: '0 0 auto', background: '#fff', borderBottom: '1.5px solid rgba(28,28,28,.1)', padding: '1.25rem 1.75rem', display: 'flex', gap: '1rem', alignItems: 'center' } },
+            avatar(sel, 52),
+            h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { className: 'u-text-style-h5 u-weight-medium', style: { lineHeight: 1.2 } }, sel.company), sel.industry ? h('div', { className: 'u-text-style-small u-color-faded' }, sel.industry) : null),
+            h('button', { onClick: () => this.setState({ selectedId: null }), 'aria-label': 'Close', style: { cursor: 'pointer', border: 'none', background: '#f0f0ee', borderRadius: '100vw', width: '2.2rem', height: '2.2rem', fontSize: '1.1rem', color: '#0f153b' } }, '×')),
+          h('div', { style: { flex: 1, overflowY: 'auto', padding: '1.75rem' } },
+            (sel.previousAssessments && sel.previousAssessments.length) ? h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '1.25rem', padding: '.3rem', background: '#f0f0ee', borderRadius: '100vw', width: 'fit-content' } },
+              h('button', { onClick: () => this.setState({ assessmentTab: 'current' }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'current' ? '#8c4799' : 'transparent', color: assessmentTab === 'current' ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, 'Current — ' + (sel.lastReassessed || sel.assessmentDate || 'undated')),
+              sel.previousAssessments.map((p, i) => h('button', { key: i, onClick: () => this.setState({ assessmentTab: 'prev' + i }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'prev' + i ? '#8c4799' : 'transparent', color: assessmentTab === 'prev' + i ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, p.date || 'Undated'))) : null,
+            h('div', { style: { display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' } }, badge(activeAssess.overall), !activeAssess.isCurrent ? tag('Past assessment', '#9aa0b4') : null, sel.ttpc ? tag('TTPC partner', '#8c4799') : null, sel.adCouncil ? tag('Ad Council board', '#e87722') : null, sel.top10 ? tag('Top 10 priority', '#e03c32') : null, sel.industry ? h('span', { className: 'u-text-style-small u-color-faded' }, sel.industry) : null),
+            (activeAssess.isCurrent && changesSinceLast) ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid ' + (changesSinceLast.items.length || changesSinceLast.scoreLine ? '#c7e3f0' : 'rgba(28,28,28,.1)'), background: (changesSinceLast.items.length || changesSinceLast.scoreLine) ? '#eef7fb' : '#f9f9f7', borderRadius: '.8rem', padding: '.85rem 1rem' } },
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#2b7ea1', marginBottom: '.5rem' } }, 'Changes since ' + (changesSinceLast.since || 'last assessment')),
+              (changesSinceLast.items.length || changesSinceLast.scoreLine) ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem' } },
+                changesSinceLast.scoreLine ? h('div', { style: { fontSize: '.85rem', color: '#0f153b' } }, h('span', { style: { fontWeight: 500 } }, 'Readiness score: '), changesSinceLast.scoreLine) : null,
+                changesSinceLast.items.map((it, i) => h('div', { key: i, style: { fontSize: '.85rem', color: '#0f153b' } }, h('span', { style: { fontWeight: 500 } }, it.label + ': '), it.from + ' → ' + it.to))) : h('div', { style: { fontSize: '.85rem', color: '#6b6f80' } }, 'No changes in classification or score since the last assessment.')) : null,
+            sel.website ? h('div', { style: { marginBottom: '1.1rem' } }, h('a', { href: (/^https?:/i.test(sel.website) ? sel.website : 'https://' + sel.website), target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.85rem' } }, sel.website.replace(/^https?:\/\//, ''))) : null,
+            sel.parentNote ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid #d9bfe0', background: '#f3e9f5', borderRadius: '.8rem', padding: '.85rem 1rem', display: 'flex', gap: '.6rem', alignItems: 'flex-start' } },
+              h('span', { style: { fontSize: '1rem', lineHeight: 1.2, flex: '0 0 auto' } }, 'ⓘ'),
+              h('div', null, h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#8c4799', marginBottom: '.25rem' } }, 'Coalition status'), h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.parentNote))) : null,
+            sel.top10Notes ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid #f3b8b4', background: '#fdefee', borderRadius: '.8rem', padding: '.85rem 1rem' } },
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.25rem' } }, 'Top 10 priority notes'), h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.top10Notes)) : null,
+            (sel.board && sel.board.length) ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid #f0dcc4', background: '#fdf7ef', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#b5651d', marginBottom: '.6rem' } }, 'Ad Council board — ' + sel.board.length + (sel.board.length === 1 ? ' member' : ' members')),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.5rem' } }, sel.board.map((m, i) => h('div', { key: i, style: { display: 'flex', gap: '.75rem', alignItems: 'center', justifyContent: 'space-between', background: '#fff', border: '1px solid rgba(28,28,28,.08)', borderRadius: '.6rem', padding: '.6rem .8rem' } },
+                h('div', { style: { minWidth: 0 } }, h('div', { style: { fontWeight: 500, fontSize: '.88rem' } }, m.name || '—'), m.title ? h('div', { style: { fontSize: '.8rem', color: '#6b6f80' } }, m.title) : null),
+                h('div', { style: { display: 'flex', gap: '.35rem', flexWrap: 'wrap', flex: '0 0 auto', alignItems: 'center' } }, m.role ? tag(m.role, m.role === 'Officer' ? '#8c4799' : '#56adde') : null, m.ec ? tag('Executive Circle', '#e87722') : null))))) : null,
+            (sel.pointsOfContact && sel.pointsOfContact.length) ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.6rem' } }, 'Opportunity@Work points of contact'),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.4rem' } }, sel.pointsOfContact.map((p, i) => h('div', { key: i, style: { fontSize: '.85rem', color: '#0f153b' } }, h('span', { style: { fontWeight: 500 } }, p.name), p.title ? ' — ' + p.title : '')))) : null,
+            engById[sel.id] ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.6rem' } }, 'Website visitor history'),
+              h('div', { style: { display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginBottom: engById[sel.id].topPages.length ? '.75rem' : 0 } },
+                h('div', null, h('div', { style: { fontSize: '1.15rem', fontWeight: 600, color: '#0f153b' } }, engById[sel.id].total), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'total visits')),
+                h('div', null, h('div', { style: { fontSize: '1.15rem', fontWeight: 600, color: '#0f153b' } }, engById[sel.id].unique), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'unique pages')),
+                engById[sel.id].oaw ? h('div', null, h('div', { style: { fontSize: '1.15rem', fontWeight: 600, color: '#8c4799' } }, engById[sel.id].oaw), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'O@W visits')) : null,
+                engById[sel.id].ttpc ? h('div', null, h('div', { style: { fontSize: '1.15rem', fontWeight: 600, color: '#e87722' } }, engById[sel.id].ttpc), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'Tear the Paper Ceiling visits')) : null,
+                engById[sel.id].recentWeek ? h('div', null, h('div', { style: { fontSize: '.85rem', fontWeight: 500, color: '#0f153b', marginTop: '.15rem' } }, engById[sel.id].recentWeek), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'most recent activity')) : null),
+              engById[sel.id].topPages.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.3rem' } }, engById[sel.id].topPages.slice(0, 5).map((p, i) => h('div', { key: i, style: { display: 'flex', gap: '.5rem', fontSize: '.8rem', alignItems: 'baseline' } }, h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#4a4e60' } }, p.page || p.url || p.path), p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits + (p.visits === 1 ? ' visit' : ' visits')) : null))) : null) : null,
+            field('Overall classification reasoning', linkify(activeAssess.overallWhy, activeAssess.sources)),
+            activeAssess.isCurrent ? field("What we've done together", sel.doneTogether) : null,
+            !activeAssess.isCurrent && activeAssess.scoreDelta ? field('Score change', activeAssess.scoreDelta) : null,
+            h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', margin: '1.5rem 0 .75rem' } }, 'Dimension classifications'),
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.85rem', marginBottom: '1.25rem' } },
+              this.CATS.map(k => { const cc = activeAssess.categories[k.key] || {}; return cc.cls ? h('div', { key: k.key, style: { border: '1px solid rgba(28,28,28,.08)', borderRadius: '.7rem', padding: '.85rem 1rem' } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '.75rem', alignItems: 'center', marginBottom: cc.why ? '.4rem' : 0 } }, tip(h('span', { style: { fontWeight: 500, fontSize: '.85rem', borderBottom: '1px dotted #b9bcc7' } }, k.label), this.catStageDef(k.label, cc.cls)), badge(cc.cls, true, this.catStageDef(k.label, cc.cls))),
+                cc.why ? h('p', { style: { margin: 0, fontSize: '.82rem', lineHeight: 1.45, color: '#4a4e60', whiteSpace: 'pre-wrap' } }, linkify(cc.why, activeAssess.sources)) : null) : null; })),
+            activeAssess.isCurrent ? field('International context', sel.international) : null,
+            activeAssess.isCurrent ? field('Edge case flags', sel.edgeFlags) : null,
+            field(activeAssess.isCurrent ? 'Current assessment date' : 'Assessment date', activeAssess.isCurrent ? (sel.lastReassessed || sel.assessmentDate) : activeAssess.date),
+            activeAssess.isCurrent ? field('Latest change', [sel.lastChangeDirection, sel.latestChangeSummary].filter(Boolean).join(' — ')) : null,
+            (activeAssess.sources && activeAssess.sources.length) ? h('div', { style: { marginBottom: '1.1rem' } },
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.4rem' } }, 'Sources (' + activeAssess.sources.length + ')'),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem' } }, activeAssess.sources.map((s, i) => h('a', { key: i, href: s, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.82rem', wordBreak: 'break-all' } }, (i + 1) + '. ' + s)))) : null,
+            commentsSection,
+            h('div', { style: { display: 'flex', gap: '.6rem', marginTop: '1.5rem', borderTop: '1.5px solid rgba(28,28,28,.1)', paddingTop: '1.25rem', flexWrap: 'wrap' } },
+              engById[sel.id] ? actionBtn('View website engagement →', () => { const e = engById[sel.id]; this.setState({ page: 'engagement', engQ: e.company, engExpanded: { [e.company]: true }, selectedId: null }); window.scrollTo({ top: 0 }); }) : null,
+              actionBtn(this.isFav(sel.id) ? '★ Favorited' : '☆ Favorite', () => this.toggleFavorite(sel.id)),
+              actionBtn('Download', () => this.downloadCompany(sel.id)),
+              isAdmin ? actionBtn('Edit', () => this.startEdit(sel), true) : null,
+              h('button', { onClick: () => this.remove(sel.id), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', display: isAdmin ? undefined : 'none' } }, 'Delete')))))
+        : null;
+
+      const e = st.editing;
+      const inputStyle = { width: '100%', padding: '.55rem .8rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.88rem', background: '#fff', boxSizing: 'border-box' };
+      const lbl = t => h('label', { style: { fontSize: '.75rem', fontWeight: 600, color: '#4a4e60', display: 'block', marginBottom: '.3rem' } }, t);
+      const textField = (label, key, ml) => h('div', null, lbl(label), h(ml ? 'textarea' : 'input', { value: e[key] || '', rows: ml ? 3 : undefined, onChange: ev => this.setEdit({ [key]: ev.target.value }), style: Object.assign({}, inputStyle, ml ? { resize: 'vertical', lineHeight: 1.4 } : {}) }));
+      const stageSelect = (val, on) => h('select', { value: val, onChange: on, style: Object.assign({}, inputStyle, { cursor: 'pointer' }) }, this.STAGES.map(s => h('option', { key: s, value: s }, s)));
+      const form = e ? h('div', { onClick: () => this.cancelEdit(), style: { position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(15,21,59,.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '3vh 1rem', overflowY: 'auto' }, className: 'sfj-fade' },
+        h('div', { onClick: ev => ev.stopPropagation(), style: { width: 'min(680px, 96vw)', background: '#fff', borderRadius: '1rem', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,.25)' } },
+          h('div', { style: { padding: '1.25rem 1.75rem', borderBottom: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+            h('span', { className: 'u-text-style-h6 u-weight-medium' }, st.isNew ? 'Add company' : 'Edit ' + (e.company || 'company')),
+            h('button', { onClick: () => this.cancelEdit(), style: { cursor: 'pointer', border: 'none', background: '#f0f0ee', borderRadius: '100vw', width: '2.2rem', height: '2.2rem', fontSize: '1.1rem' } }, '×')),
+          h('div', { style: { padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' } },
+            textField('Company', 'company'),
+            textField('Logo URL', 'logo'),
+            h('div', { style: { display: 'flex', gap: '1.5rem', flexWrap: 'wrap' } },
+              h('label', { style: { display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.88rem', cursor: 'pointer' } }, h('input', { type: 'checkbox', checked: !!e.ttpc, onChange: ev => this.setEdit({ ttpc: ev.target.checked }) }), 'TTPC Coalition partner'),
+              h('label', { style: { display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.88rem', cursor: 'pointer' } }, h('input', { type: 'checkbox', checked: !!e.adCouncil, onChange: ev => this.setEdit({ adCouncil: ev.target.checked }) }), 'Ad Council board member')),
+            h('div', null, lbl('Overall journey classification'), stageSelect(e.overall, ev => this.setEdit({ overall: ev.target.value }))),
+            textField('Overall classification reasoning', 'overallWhy', true),
+            textField("What we've done together", 'doneTogether', true),
+            h('div', { style: { display: 'flex', gap: '1.5rem', flexWrap: 'wrap' } },
+              h('label', { style: { display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.88rem', cursor: 'pointer' } }, h('input', { type: 'checkbox', checked: !!e.top10, onChange: ev => this.setEdit({ top10: ev.target.checked }) }), 'Top 10 priority prospect')),
+            textField('Top 10 notes', 'top10Notes', true),
+            h('div', null, lbl('Engagement ideas (one per line)'), h('textarea', { value: (e.engagementIdeas || []).join('\n'), rows: 3, onChange: ev => this.setEdit({ engagementIdeas: ev.target.value.split('\n').map(s => s.trim()).filter(Boolean) }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })),
+            h('div', null, lbl('Points of contact (one per line: Name — Title)'), h('textarea', { value: (e.pointsOfContact || []).map(p => p.name + (p.title ? ' — ' + p.title : '')).join('\n'), rows: 2, onChange: ev => this.setEdit({ pointsOfContact: ev.target.value.split('\n').map(s => s.trim()).filter(Boolean).map(s => { const parts = s.split(' — '); return { name: parts[0], title: parts[1] || '' }; }) }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })),
+            h('div', { style: { fontSize: '.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginTop: '.5rem' } }, 'Dimension classifications'),
+            this.CATS.map(k => { const cc = e.categories[k.key] || {}; return h('div', { key: k.key, style: { border: '1px solid rgba(28,28,28,.1)', borderRadius: '.7rem', padding: '.85rem 1rem', display: 'flex', flexDirection: 'column', gap: '.5rem' } },
+              h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 13rem', gap: '.75rem', alignItems: 'center' } }, h('span', { style: { fontWeight: 500, fontSize: '.85rem' } }, k.label), stageSelect(cc.cls, ev => this.setEditCat(k.key, { cls: ev.target.value }))),
+              h('textarea', { value: cc.why || '', rows: 2, placeholder: 'Reasoning…', onChange: ev => this.setEditCat(k.key, { why: ev.target.value }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })); }),
+            h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' } }, textField('International context', 'international', true), textField('Edge case flags', 'edgeFlags', true)),
+            h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem' } }, textField('Assessment date', 'assessmentDate'),
+              h('div', null, lbl('Source links (one per line)'), h('textarea', { value: (e.sources || []).join('\n'), rows: 3, onChange: ev => this.setEdit({ sources: ev.target.value.split('\n').map(s => s.trim()).filter(Boolean) }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })))),
+          h('div', { style: { padding: '1.25rem 1.75rem', borderTop: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'flex-end', gap: '.7rem', position: 'sticky', bottom: 0, background: '#fff' } },
+            h('button', { onClick: () => this.cancelEdit(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.88rem', fontWeight: 500, padding: '.6rem 1.25rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Cancel'),
+            actionBtn(st.isNew ? 'Add company' : 'Save changes', () => this.saveForm(), true)))) : null;
+
+      // ---- SHARE BAR + MODAL ----
+      const shareBar = selIds.length ? h('div', { className: 'sfj-fade', style: { position: 'fixed', left: '50%', bottom: '1.5rem', transform: 'translateX(-50%)', zIndex: 44, background: '#0f153b', color: '#fff', borderRadius: '100vw', padding: '.55rem .6rem .55rem 1.35rem', display: 'flex', alignItems: 'center', gap: '.9rem', boxShadow: '0 12px 40px rgba(0,0,0,.3)', maxWidth: '94vw' } },
+        h('span', { style: { fontSize: '.9rem', fontWeight: 500, whiteSpace: 'nowrap' } }, selIds.length + ' selected'),
+        h('button', { onClick: () => this.selectAll(list.map(c => c.id)), style: { cursor: 'pointer', background: 'none', border: 'none', color: '#c9a4d4', fontFamily: 'inherit', fontSize: '.82rem', whiteSpace: 'nowrap' } }, 'Select all shown'),
+        h('button', { onClick: () => this.setState({ shareOpen: true }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.88rem', fontWeight: 500, padding: '.5rem 1.15rem', borderRadius: '100vw', border: 'none', background: '#8c4799', color: '#fff', whiteSpace: 'nowrap' } }, 'Share via email'),
+        h('button', { onClick: () => this.clearSelected(), 'aria-label': 'Clear selection', style: { cursor: 'pointer', border: 'none', background: 'rgba(255,255,255,.12)', color: '#fff', borderRadius: '100vw', width: '2.1rem', height: '2.1rem', fontSize: '1.1rem', flex: '0 0 auto' } }, '×')) : null;
+
+      const radio = (val, label, sub) => h('label', { style: { display: 'flex', gap: '.6rem', alignItems: 'flex-start', padding: '.75rem 1rem', border: '1.5px solid ' + (st.shareDetail === val ? '#8c4799' : 'rgba(28,28,28,.15)'), borderRadius: '.7rem', cursor: 'pointer', background: st.shareDetail === val ? '#faf5fb' : '#fff' } },
+        h('input', { type: 'radio', name: 'sfj-detail', checked: st.shareDetail === val, onChange: () => this.setState({ shareDetail: val }), style: { marginTop: '.15rem', accentColor: '#8c4799' } }),
+        h('div', null, h('div', { style: { fontWeight: 500, fontSize: '.88rem' } }, label), h('div', { style: { fontSize: '.78rem', color: '#6b6f80' } }, sub)));
+      const shareModal = st.shareOpen ? h('div', { onClick: () => this.setState({ shareOpen: false }), style: { position: 'fixed', inset: 0, zIndex: 55, background: 'rgba(15,21,59,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }, className: 'sfj-fade' },
+        h('div', { onClick: ev => ev.stopPropagation(), style: { width: 'min(520px, 96vw)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: '1rem', boxShadow: '0 20px 60px rgba(0,0,0,.25)' } },
+          h('div', { style: { padding: '1.25rem 1.75rem', borderBottom: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+            h('span', { className: 'u-text-style-h6 u-weight-medium' }, 'Share ' + selIds.length + ' ' + (selIds.length === 1 ? 'company' : 'companies')),
+            h('button', { onClick: () => this.setState({ shareOpen: false }), style: { cursor: 'pointer', border: 'none', background: '#f0f0ee', borderRadius: '100vw', width: '2.2rem', height: '2.2rem', fontSize: '1.1rem' } }, '×')),
+          h('div', { style: { padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' } },
+            h('div', null, lbl('Recipient email'), h('input', { type: 'email', value: st.shareTo, placeholder: 'name@example.com', onChange: ev => this.setState({ shareTo: ev.target.value }), style: inputStyle })),
+            h('div', null, lbl('Add a message (optional)'), h('textarea', { value: st.shareMsg, rows: 3, placeholder: 'A quick note to go above the company details…', onChange: ev => this.setState({ shareMsg: ev.target.value }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })),
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.6rem' } }, lbl('How much detail?'),
+              radio('summary', 'Summary', 'Classification, membership, and dimension summary for each company.'),
+              radio('full', 'Full detail', 'Adds the full reasoning across all six dimensions plus source links.')),
+            h('div', { style: { fontSize: '.78rem', color: '#6b6f80', background: '#f9f9f7', borderRadius: '.6rem', padding: '.7rem .9rem' } }, '"Send email" delivers straight from the app (via Apps Script) to the address above. "Open draft" opens it in your own email client instead. Neither includes account owner, edge-case flags, or "where things stand now" — those stay internal.')),
+          h('div', { style: { padding: '1.25rem 1.75rem', borderTop: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'flex-end', gap: '.6rem', flexWrap: 'wrap' } },
+            h('button', { onClick: () => this.copyShare(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.88rem', fontWeight: 500, padding: '.6rem 1.25rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Copy'),
+            actionBtn('Open draft', () => this.openEmail()),
+            actionBtn(st.sending ? 'Sending…' : 'Send email', () => this.sendEmail(), true))) ) : null;
+
+      const toast = st.toast ? h('div', { className: 'sfj-fade', style: { position: 'fixed', bottom: selIds.length ? '5rem' : '1.5rem', left: '50%', transform: 'translateX(-50%)', zIndex: 60, background: '#8c4799', color: '#fff', padding: '.75rem 1.5rem', borderRadius: '100vw', fontSize: '.88rem', boxShadow: '0 8px 30px rgba(0,0,0,.25)' } }, st.toast) : null;
+      const hiddenFile = h('input', { ref: this.fileRef, type: 'file', accept: '.csv,text/csv', style: { display: 'none' }, onChange: ev => { const f = ev.target.files[0]; if (f) this.importCSV(f); ev.target.value = ''; } });
+
+      // ---- NAV ----
+      const tabs = [['journey', 'Skills-first journey'], ['priority', 'Priority prospects'], ['resources', 'Ad Council resources'], ['engagement', 'Website engagement'], ['definitions', 'Definitions']];
+      if (isAdmin) { tabs.push(['activity', 'Activity log']); tabs.push(['admin', 'Admin & data']); }
+      const navTab = (id, label) => h('button', { key: id, onClick: () => { this.track('Viewed page', label); this.setState({ page: id }); if (id === 'activity') this.refreshActivity(); },
+        style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.88rem', fontWeight: 500, padding: '.55rem 1.05rem', borderRadius: '100vw', border: 'none', whiteSpace: 'nowrap', background: st.page === id ? '#0f153b' : 'transparent', color: st.page === id ? '#fff' : '#0f153b' } }, label);
+      const nav = h('div', { style: { position: 'sticky', top: 0, zIndex: 25, background: '#fff', borderBottom: '1.5px solid rgba(28,28,28,.08)' } },
+        h('div', { className: 'u-container', style: { display: 'flex', gap: '.75rem', padding: '.6rem 0', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' } },
+          h('div', { style: { display: 'flex', gap: '.25rem', padding: '.25rem', background: '#f0f0ee', borderRadius: '100vw', overflowX: 'auto', flex: '1 1 auto', minWidth: 0 } }, tabs.map(t => navTab(t[0], t[1]))),
+          h('div', { style: { display: 'flex', gap: '.75rem', alignItems: 'center', flex: '0 0 auto' } },
+            h('button', { onClick: () => this.refreshFromSheet(), disabled: st.syncing, title: st.liveSync ? (st.liveSync.ok ? 'Synced ' + new Date(st.liveSync.at).toLocaleTimeString() : 'Last sync failed: ' + st.liveSync.error) : 'Data loads live from the Google Sheet on every page load', style: { cursor: st.syncing ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 500, padding: '.4rem .85rem', borderRadius: '100vw', border: '1.5px solid ' + (st.liveSync && !st.liveSync.ok ? '#e03c32' : 'rgba(28,28,28,.12)'), background: '#fff', color: st.liveSync && !st.liveSync.ok ? '#e03c32' : '#6b6f80', whiteSpace: 'nowrap' } }, st.syncing ? 'Refreshing…' : (st.liveSync && !st.liveSync.ok ? '⚠ Refresh failed' : (st.liveSync ? '↻ Refreshed from Sheet' : '↻ Refresh from Sheet'))),
+            h('span', { style: { fontSize: '.8rem', color: '#6b6f80' } }, st.auth.name || st.auth.email),
+            h('button', { onClick: () => this.logout(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.82rem', fontWeight: 500, padding: '.42rem .9rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Sign out'))));
+
+      const inp2 = { width: '100%', padding: '.55rem .8rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.88rem', background: '#fff', boxSizing: 'border-box' };
+      const L2 = t => h('div', { style: { fontSize: '.75rem', fontWeight: 600, color: '#4a4e60', marginBottom: '.3rem' } }, t);
+
+      // ---- ACTIVITY PAGE (admin) ----
+      const activityPage = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '3rem' } },
+        h('div', { className: 'u-container' },
+          h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Activity log'),
+          h('h1', { className: 'u-text-style-h2', style: { margin: 0 } }, 'Who accessed what'),
+          h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '56ch' } }, 'Every sign-in and record viewed is logged to the shared "Activity Log" sheet tab — visible here to every administrator, on every device. ' + st.activity.length + ' event' + (st.activity.length === 1 ? '' : 's') + ' recorded.'),
+          h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '.6rem', marginTop: '1.25rem', marginBottom: '.75rem' } }, actionBtn('Refresh', () => this.refreshActivity()), actionBtn('Clear history', () => this.clearActivity())),
+          h('div', { className: 'card', style: { padding: 0, background: '#fff', overflowX: 'auto' } },
+            h('table', { style: { width: '100%', borderCollapse: 'collapse', minWidth: '40rem' } },
+              h('thead', null, h('tr', null, ['Administrator', 'Action', 'Detail', 'When'].map(x => h('th', { key: x, style: { textAlign: 'left', padding: '.75rem 1rem', fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', whiteSpace: 'nowrap' } }, x)))),
+              h('tbody', null, st.activity.length ? st.activity.map((a, i) => h('tr', { key: i }, [a.who || '—', a.action, a.target || '—', a.ts ? new Date(a.ts).toLocaleString() : '—'].map((v, j) => h('td', { key: j, style: { padding: '.62rem 1rem', fontSize: '.85rem', borderTop: '1px solid rgba(28,28,28,.07)', color: j === 2 ? '#6b6f80' : '#0f153b', whiteSpace: j === 3 ? 'nowrap' : 'normal' } }, v))))
+                : h('tr', null, h('td', { colSpan: 4, style: { padding: '2.5rem', textAlign: 'center', color: '#9aa0b4' } }, 'No activity recorded yet.')))))));
+
+      // ---- ADMIN & DATA PAGE (admin) ----
+      const adminCard = (title, body) => h('div', { className: 'card', style: { padding: '1.75rem', background: '#fff' } }, h('div', { className: 'u-text-style-h6 u-weight-medium', style: { marginBottom: '1rem' } }, title), body);
+      const adminPage = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '3rem' } },
+        h('div', { className: 'u-container', style: { display: 'flex', flexDirection: 'column', gap: '1.5rem' } },
+          h('div', null, h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Administration'), h('h1', { className: 'u-text-style-h2', style: { margin: 0 } }, 'Manage access, appearance & data')),
+          adminCard('Administrators', h('div', null,
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.5rem', marginBottom: '1.25rem' } }, st.admins.map(a => h('div', { key: a.email, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', border: '1px solid rgba(28,28,28,.08)', borderRadius: '.6rem', padding: '.6rem .9rem' } },
+              h('div', null, h('div', { style: { fontWeight: 500, fontSize: '.88rem' } }, a.name), h('div', { style: { fontSize: '.8rem', color: '#6b6f80' } }, a.email)),
+              a.email === st.auth.email ? h('span', { style: { fontSize: '.75rem', fontWeight: 600, color: ACC } }, 'You') : h('button', { onClick: () => this.removeAdmin(a.email), style: { cursor: 'pointer', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', borderRadius: '100vw', padding: '.3rem .8rem', fontFamily: 'inherit', fontSize: '.8rem' } }, 'Remove')))),
+            h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '.6rem', alignItems: 'end' } },
+              h('div', null, L2('Name'), h('input', { value: st.naName, onChange: e => this.setState({ naName: e.target.value }), style: inp2 })),
+              h('div', null, L2('Email'), h('input', { value: st.naEmail, onChange: e => this.setState({ naEmail: e.target.value }), style: inp2 })),
+              h('div', null, L2('Password'), h('input', { type: 'password', value: st.naPass, onChange: e => this.setState({ naPass: e.target.value }), style: inp2 })),
+              actionBtn('Add admin', () => this.addAdmin(), true)))),
+          adminCard('Appearance', h('div', { style: { display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.25rem', alignItems: 'start' } },
+            h('div', null, L2('App title'), h('input', { value: st.settings.title, onChange: e => this.setSetting({ title: e.target.value }), style: inp2 })),
+            h('div', null, L2('Accent color'), h('div', { style: { display: 'flex', gap: '.5rem' } }, ['#8c4799', '#0f153b', '#e87722', '#56adde', '#e03c32'].map(col => h('button', { key: col, onClick: () => { this.setSetting({ accent: col }); this.track('Changed accent color', col); }, 'aria-label': col, style: { width: '2.1rem', height: '2.1rem', borderRadius: '100vw', border: st.settings.accent === col ? '3px solid #0f153b' : '1.5px solid rgba(0,0,0,.12)', background: col, cursor: 'pointer' } })))))),
+          adminCard('Email sending', h('p', { style: { fontSize: '.85rem', color: '#6b6f80', margin: 0 } }, 'The "Send email" button in Share sends directly from this app via Apps Script (MailApp) — no setup required. It excludes account owner, edge-case flags, and "where things stand now" automatically, per the sharing policy in CLAUDE.md.')),
+          adminCard('Data', h('div', null,
+            h('p', { style: { fontSize: '.85rem', color: '#6b6f80', marginTop: 0 } }, 'Company data lives in the "' + 'Master Spreadsheet' + '" tab of the Google Sheet — every load reads it fresh, and every add/edit/delete/CSV-import writes straight back to it. Nothing is cached in the app or in this browser. Paste JSON below to bulk-upsert (matched to existing rows by company name).'),
+            h('div', { style: { display: 'flex', gap: '.6rem', flexWrap: 'wrap', marginBottom: '.75rem' } },
+              actionBtn('Load current data', () => this.setState({ dataText: JSON.stringify(this.state.companies, null, 1) })),
+              actionBtn('Apply changes', () => this.applyDataText(), true),
+              actionBtn('Refresh from Sheet', () => this.refreshFromSheet())),
+            h('textarea', { value: st.dataText, placeholder: 'Click "Load current data" to populate…', onChange: e => this.setState({ dataText: e.target.value }), spellCheck: false, style: Object.assign({}, inp2, { minHeight: '16rem', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '.72rem', lineHeight: 1.4, resize: 'vertical', whiteSpace: 'pre' }) })))));
+
+      // ---- ENGAGEMENT PAGE ----
+      const engList = this.engFiltered();
+      const sum = k => this.ENG.reduce((s, e) => s + (e[k] || 0), 0);
+      const engKpi = (v, label, color) => h('div', { className: 'card', style: { padding: '1.5rem', background: '#fff' } },
+        h('div', { className: 'u-text-style-h3 u-weight-medium', style: { color: color || '#0f153b', lineHeight: 1 } }, v.toLocaleString()),
+        h('div', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.4rem' } }, label));
+      const engMax = Math.max(1, ...this.ENG.map(e => e.total));
+      const leaderboard = h('div', { className: 'card', style: { padding: '1.75rem', background: '#fff', marginTop: '1.5rem' } },
+        h('div', { className: 'u-hflex-between-center', style: { marginBottom: '1.25rem', flexWrap: 'wrap', gap: '.5rem' } },
+          h('div', { className: 'u-text-style-small u-weight-semi-bold' }, 'Most engaged companies — visits by property'),
+          h('div', { style: { display: 'flex', gap: '1rem' } },
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '.35rem', fontSize: '.72rem' } }, h('span', { style: { width: '.7rem', height: '.7rem', borderRadius: '2px', background: '#e87722' } }), 'Tear the Paper Ceiling'),
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '.35rem', fontSize: '.72rem' } }, h('span', { style: { width: '.7rem', height: '.7rem', borderRadius: '2px', background: '#8c4799' } }), 'Opportunity@Work'))),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.7rem' } },
+          this.ENG.slice(0, 12).map(e => h('div', { key: e.company, onClick: () => this.setState({ engDetail: e }), style: { display: 'flex', alignItems: 'center', gap: '.9rem', cursor: 'pointer' } },
+            h('div', { style: { width: '9rem', flex: '0 0 auto', fontSize: '.82rem', color: '#0f153b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, e.company),
+            h('div', { style: { flex: 1, display: 'flex', height: '1.3rem', borderRadius: '100vw', overflow: 'hidden', background: '#f0f0ee' } },
+              e.ttpc ? h('div', { title: 'TTPC: ' + e.ttpc, style: { width: (e.ttpc / engMax * 100) + '%', background: '#e87722' } }) : null,
+              e.oaw ? h('div', { title: 'O@W: ' + e.oaw, style: { width: (e.oaw / engMax * 100) + '%', background: '#8c4799' } }) : null),
+            h('div', { style: { width: '2.5rem', textAlign: 'right', fontWeight: 600, fontSize: '.85rem', fontVariantNumeric: 'tabular-nums' } }, e.total)))));
+
+      const engCard = e => { const matched = companies.find(c => c.id === e.id); return h('div', { key: e.company, className: 'card sfj-card', onClick: () => this.setState({ engDetail: e }), style: { padding: '1.4rem', background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '.9rem' } },
+        h('div', { style: { display: 'flex', gap: '.75rem', alignItems: 'center' } }, avatar(e, 40),
+          h('div', { style: { minWidth: 0, flex: 1 } }, h('div', { className: 'u-weight-medium', style: { fontSize: '.98rem', color: '#0f153b' } }, e.company),
+            e.recentWeek ? h('div', { className: 'u-text-style-small u-color-faded' }, 'Most recent activity: ' + e.recentWeek) : null,
+            matched && (matched.lastReassessed || matched.assessmentDate) ? h('div', { className: 'u-text-style-small u-color-faded' }, 'Assessed: ' + (matched.lastReassessed || matched.assessmentDate)) : null)),
+        h('div', { style: { display: 'flex', gap: '1.5rem' } },
+          h('div', null, h('div', { style: { fontSize: '1.3rem', fontWeight: 600, color: '#0f153b' } }, e.total.toLocaleString()), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'total visits')),
+          e.oaw ? h('div', null, h('div', { style: { fontSize: '1.3rem', fontWeight: 600, color: '#8c4799' } }, e.oaw), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'O@W')) : null,
+          e.ttpc ? h('div', null, h('div', { style: { fontSize: '1.3rem', fontWeight: 600, color: '#e87722' } }, e.ttpc), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'TTPC')) : null),
+        e.topPages.length ? h('div', null,
+          h('div', { style: { fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.4rem' } }, 'Top pages'),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.3rem' } }, e.topPages.slice(0, 5).map((p, i) => h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', gap: '.6rem', fontSize: '.8rem' } },
+            h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#4a4e60' } }, p.url),
+            p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits) : null)))) : null); };
+      const engGrid = h('div', { className: 'u-grid-column-3', style: { marginTop: '1.5rem' } }, engList.map(engCard));
+
+      // ---- ENGAGEMENT DETAIL POPUP ----
+      const ed = st.engDetail;
+      const edMatched = ed ? companies.find(c => c.id === ed.id) : null;
+      const engPopup = ed ? h('div', { onClick: () => this.setState({ engDetail: null }), style: { position: 'fixed', inset: 0, zIndex: 55, background: 'rgba(8,11,32,.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '2.5vh 1rem' }, className: 'sfj-fade' },
+        h('div', { onClick: ev => ev.stopPropagation(), style: { width: 'min(520px, 96vw)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: '1rem', boxShadow: '0 30px 80px rgba(0,0,0,.4)' } },
+          h('div', { style: { padding: '1.25rem 1.5rem', borderBottom: '1.5px solid rgba(28,28,28,.1)', display: 'flex', gap: '1rem', alignItems: 'center' } },
+            avatar(ed, 44),
+            h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { className: 'u-text-style-h6 u-weight-medium' }, ed.company), h('div', { className: 'u-text-style-small u-color-faded' }, 'Website visitor history')),
+            h('button', { onClick: () => this.setState({ engDetail: null }), 'aria-label': 'Close', style: { cursor: 'pointer', border: 'none', background: '#f0f0ee', borderRadius: '100vw', width: '2.2rem', height: '2.2rem', fontSize: '1.1rem', color: '#0f153b', flex: '0 0 auto' } }, '×')),
+          h('div', { style: { padding: '1.5rem' } },
+            (edMatched && (edMatched.lastReassessed || edMatched.assessmentDate)) ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid #d9bfe0', background: '#f3e9f5', borderRadius: '.7rem', padding: '.75rem 1rem', display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' } },
+              h('div', null, h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#8c4799', marginBottom: '.2rem' } }, 'Skills-first assessment date'), h('div', { style: { fontSize: '.88rem', color: '#0f153b' } }, edMatched.lastReassessed || edMatched.assessmentDate)),
+              ed.recentWeek ? h('div', null, h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#8c4799', marginBottom: '.2rem' } }, 'Most recent site activity'), h('div', { style: { fontSize: '.88rem', color: '#0f153b' } }, ed.recentWeek)) : null) : null,
+            h('div', { style: { display: 'flex', gap: '1.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' } },
+              h('div', null, h('div', { style: { fontSize: '1.4rem', fontWeight: 600, color: '#0f153b' } }, ed.total.toLocaleString()), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'total visits')),
+              h('div', null, h('div', { style: { fontSize: '1.4rem', fontWeight: 600, color: '#0f153b' } }, ed.unique), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'unique pages')),
+              ed.oaw ? h('div', null, h('div', { style: { fontSize: '1.4rem', fontWeight: 600, color: '#8c4799' } }, ed.oaw), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'O@W visits')) : null,
+              ed.ttpc ? h('div', null, h('div', { style: { fontSize: '1.4rem', fontWeight: 600, color: '#e87722' } }, ed.ttpc), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'TTPC visits')) : null),
+            ed.topPages.length ? h('div', { style: { marginBottom: '1.5rem' } },
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.5rem' } }, 'Top pages visited'),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.4rem' } }, ed.topPages.map((p, i) => h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '.85rem' } },
+                h('a', { href: /^https?:/i.test(p.url) ? p.url : 'https://' + p.url, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { wordBreak: 'break-all' } }, p.url),
+                p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits + (p.visits === 1 ? ' visit' : ' visits')) : null)))) : null,
+            ed.id ? h('div', { style: { borderTop: '1.5px solid rgba(28,28,28,.1)', paddingTop: '1.1rem' } }, actionBtn('View skills-first journey profile →', () => { this.setState({ engDetail: null }); this.openCompany(ed.id); }, true)) : h('div', { className: 'u-text-style-small u-color-faded' }, 'No matching skills-first journey record for this company yet.'))))
+        : null;
+
+      const engagement = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '3rem' } },
+        h('div', { className: 'u-container' },
+          h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Website engagement'),
+          h('h1', { className: 'u-text-style-h2', style: { margin: 0, maxWidth: '22ch' } }, 'How our companies engage with the campaign online'),
+          h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '56ch' } }, 'Recorded visits to Opportunity@Work and Tear the Paper Ceiling web properties, by company. Click a company to see its visit history.'),
+          h('div', { className: 'u-grid-column-4', style: { marginTop: '2rem' } },
+            engKpi(this.ENG.length, 'Companies with recorded visits'),
+            engKpi(sum('total'), 'Total visits'),
+            engKpi(sum('ttpc'), 'Tear the Paper Ceiling visits', '#e87722'),
+            engKpi(sum('oaw'), 'Opportunity@Work visits', '#8c4799')),
+          leaderboard,
+          h('div', { style: { marginTop: '2rem', maxWidth: '22rem' } },
+            h('input', { type: 'search', value: st.engQ, placeholder: 'Search companies…', onChange: e => this.setState({ engQ: e.target.value }), style: { width: '100%', padding: '.6rem 1rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.15)', fontFamily: 'inherit', fontSize: '.9rem', background: '#fff' } })),
+          engList.length ? engGrid : h('div', { className: 'card', style: { padding: '3rem', textAlign: 'center', background: '#fff', marginTop: '1.5rem' } }, h('p', { className: 'u-text-style-large', style: { margin: 0 } }, 'No companies match your search.'))));
+
+      const journey = h(F, null, hero, dashboard, directory);
+
+      // ---- DEFINITIONS PAGE ----
+      const stageDefRow = s => { const jd = this.DEFS.find(x => x.defType === 'Journey Definition' && x.category === s); const cr = this.DEFS.find(x => x.defType === 'Classification Decision Rules' && x.category === s); const col = this.stageColor(s);
+        return h('div', { key: s, className: 'card', style: { padding: '1.75rem', background: '#fff', borderLeft: '5px solid ' + col } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '.6rem', marginBottom: '.9rem' } }, h('span', { style: { width: '.7rem', height: '.7rem', borderRadius: '100vw', background: col, flex: '0 0 auto' } }), h('span', { className: 'u-text-style-h6 u-weight-medium' }, s)),
+          jd ? h('p', { style: { margin: '0 0 1rem', fontSize: '.95rem', lineHeight: 1.55, color: '#0f153b' } }, jd.definition) : null,
+          (jd && jd.evidence) ? h('div', { style: { fontSize: '.82rem', color: '#4a4e60', background: '#f9f9f7', borderRadius: '.6rem', padding: '.7rem .9rem', marginBottom: cr ? '1rem' : 0 } }, h('span', { style: { fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', fontSize: '.7rem', color: '#6b6f80' } }, 'Minimum evidence'), h('div', { style: { marginTop: '.25rem' } }, jd.evidence)) : null,
+          cr ? h('div', null, h('div', { style: { fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.3rem' } }, 'Classification decision rule'), h('p', { style: { margin: 0, fontSize: '.85rem', lineHeight: 1.5, color: '#4a4e60', whiteSpace: 'pre-wrap' } }, cr.definition)) : null); };
+      const catMatrixRow = k => h('tr', { key: k.key },
+        h('td', { style: { padding: '.75rem 1rem', fontSize: '.85rem', fontWeight: 500, borderTop: '1px solid rgba(28,28,28,.07)', verticalAlign: 'top', minWidth: '11rem' } }, k.label),
+        this.STAGES.map(s => h('td', { key: s, style: { padding: '.75rem 1rem', fontSize: '.8rem', lineHeight: 1.45, color: '#4a4e60', borderTop: '1px solid rgba(28,28,28,.07)', borderLeft: '1px solid rgba(28,28,28,.05)', verticalAlign: 'top' } }, this.catStageDef(k.label, s) || '—')));
+      const definitionsPage = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '3rem' } },
+        h('div', { className: 'u-container' },
+          h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Methodology'),
+          h('h1', { className: 'u-text-style-h2', style: { margin: 0, maxWidth: '22ch' } }, 'How we define the skills-first journey'),
+          h('p', { className: 'u-text-style-h6 u-weight-medium u-mt-4 u-text-wrap-pretty', style: { maxWidth: '58ch', color: '#8c4799' } }, 'Hover over any stage badge or dimension label elsewhere in the app to see these definitions in context.'),
+          h('h2', { className: 'u-text-style-h5 u-weight-medium', style: { margin: '2.5rem 0 1.25rem' } }, 'Journey stages'),
+          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))', gap: '1.25rem' } }, this.STAGES.map(stageDefRow)),
+          h('h2', { className: 'u-text-style-h5 u-weight-medium', style: { margin: '3rem 0 1.25rem' } }, 'The six dimensions, stage by stage'),
+          h('div', { className: 'card', style: { padding: 0, background: '#fff', overflowX: 'auto' } },
+            h('table', { style: { width: '100%', borderCollapse: 'collapse', minWidth: '60rem' } },
+              h('thead', null, h('tr', null, h('th', { style: { padding: '.75rem 1rem', textAlign: 'left', fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80' } }, 'Dimension'),
+                this.STAGES.map(s => h('th', { key: s, style: { padding: '.75rem 1rem', textAlign: 'left', fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', borderLeft: '1px solid rgba(28,28,28,.05)', color: this.stageColor(s), whiteSpace: 'nowrap' } }, this.stageShort(s))))),
+              h('tbody', null, this.CATS.map(catMatrixRow))))));
+
+      // ---- PRIORITY PROSPECTS PAGE ----
+      const priorityCompanies = companies.filter(c => c.top10);
+      const prospectCard = c => h('div', { key: c.id, className: 'card sfj-card', onClick: () => this.openCompany(c.id), style: { padding: '1.5rem', background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '.75rem', borderTop: '4px solid #e03c32' } },
+        h('div', { style: { display: 'flex', gap: '.9rem', alignItems: 'flex-start' } }, avatar(c, 48),
+          h('div', { style: { minWidth: 0, flex: 1 } }, h('div', { className: 'u-weight-medium', style: { fontSize: '1.0625rem', letterSpacing: '-0.02em' } }, c.company), c.industry ? h('div', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.15rem' } }, c.industry) : null)),
+        h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap' } }, badge(c.overall), c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('Ad Council', '#e87722') : null),
+        c.top10Notes ? h('p', { className: 'u-text-style-small', style: { margin: 0, color: '#0f153b' } }, c.top10Notes) : null,
+        (c.engagementIdeas && c.engagementIdeas.length) ? h('div', { style: { background: '#fdefee', border: '1px solid #f3b8b4', borderRadius: '.6rem', padding: '.7rem .85rem' } },
+          h('div', { style: { fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.35rem' } }, 'Engagement ideas'),
+          h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '.82rem', lineHeight: 1.5, color: '#0f153b' } }, c.engagementIdeas.map((idea, i) => h('li', { key: i }, idea)))) : null,
+        isAdmin ? h('div', { onClick: e => e.stopPropagation(), style: { display: 'flex', gap: '.4rem' } },
+          h('input', { value: (st.oppDrafts || {})[c.id] || '', onChange: e => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [c.id]: e.target.value }) })), onKeyDown: e => { if (e.key === 'Enter') this.addOpportunity(c.id, c.company); }, placeholder: 'Add an opportunity…', style: { flex: 1, padding: '.45rem .7rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.8rem', boxSizing: 'border-box' } }),
+          h('button', { onClick: () => this.addOpportunity(c.id, c.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.45rem .9rem', borderRadius: '.5rem', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', whiteSpace: 'nowrap' } }, 'Add')) : null);
+      const priorityPage = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '3rem' } },
+        h('div', { className: 'u-container' },
+          h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Priority prospects'),
+          h('h1', { className: 'u-text-style-h2', style: { margin: 0, maxWidth: '24ch' } }, 'Where Ad Council and Opportunity@Work are focusing next'),
+          h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '58ch' } }, 'Companies flagged as top priorities for coalition growth, with the rationale and any engagement ideas on file.'),
+          h('div', { className: 'u-grid-column-3', style: { marginTop: '2rem' } }, priorityCompanies.length ? priorityCompanies.map(prospectCard) : null),
+          !priorityCompanies.length ? h('div', { className: 'card', style: { padding: '3rem', textAlign: 'center', background: '#fff', marginTop: '1.5rem' } }, h('p', { className: 'u-text-style-large', style: { margin: 0 } }, 'No companies are flagged as priority prospects yet.'), isAdmin ? h('p', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.5rem' } }, 'Mark a company "Top 10 priority" from its edit form to add it here.') : null) : null));
+
+      // ---- AD COUNCIL RESOURCES PAGE ----
+      const RES = this.RES;
+      const resourceCard = (item, color) => h('div', { key: item.title, className: 'card', style: { padding: '1.25rem 1.4rem', background: '#fff' } },
+        h('div', { style: { display: 'flex', gap: '.6rem', alignItems: 'flex-start' } },
+          h('span', { style: { width: '.55rem', height: '.55rem', borderRadius: '100vw', background: color, flex: '0 0 auto', marginTop: '.45rem' } }),
+          h('div', null, h('div', { className: 'u-weight-medium', style: { fontSize: '.95rem', marginBottom: '.3rem' } }, item.title), h('p', { className: 'u-text-style-small u-color-faded', style: { margin: 0 } }, item.body))));
+      const resourceSection = (eyebrow, heading, items, color) => h('div', { style: { marginBottom: '3rem' } },
+        h('div', { className: 'g-eyebrow', style: { marginBottom: '.6rem' } }, eyebrow),
+        h('h2', { className: 'u-text-style-h5 u-weight-medium', style: { margin: '0 0 1.25rem' } }, heading),
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))', gap: '1rem' } }, items.map(item => resourceCard(item, color))));
+      const resourcesPage = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '2rem' } },
+        h('div', { className: 'u-container' },
+          h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Ad Council board resources'),
+          h('h1', { className: 'u-text-style-h2', style: { margin: 0, maxWidth: '24ch' } }, 'Ways to support skills-first hiring'),
+          h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '58ch', marginBottom: '2.5rem' } }, 'A working menu for Ad Council board members — from a first, no-cost step to what’s exclusive to the board.'),
+          resourceSection('Universal menu', 'How any board member can support skills-first hiring', RES.universalMenu, '#8c4799'),
+          resourceSection('Before joining TTPC', 'Turnkey ways to support the movement first', RES.turnkey, '#56adde'),
+          resourceSection('Board-only', 'Exclusive resources for Ad Council board members', RES.exclusive, '#e03c32')));
+
+      const pageEl = st.page === 'priority' ? priorityPage
+        : st.page === 'resources' ? resourcesPage
+        : st.page === 'engagement' ? engagement
+        : st.page === 'definitions' ? definitionsPage
+        : (st.page === 'activity' && isAdmin) ? activityPage
+        : (st.page === 'admin' && isAdmin) ? adminPage
+        : journey;
+      return h(F, null, nav, pageEl, drawer, engPopup, form, shareBar, shareModal, toast, hiddenFile);
+    }
+
+    loginScreen(ACC) {
+      const st = this.state;
+      const inp = { width: '100%', padding: '.7rem 1rem', borderRadius: '.6rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.95rem', background: '#fff', boxSizing: 'border-box' };
+      const lab = t => h('div', { style: { fontSize: '.78rem', fontWeight: 600, color: '#4a4e60', marginBottom: '.35rem' } }, t);
+      const submit = e => { e.preventDefault(); this.doLogin(); };
+      return h('div', { style: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 1rem', background: '#f9f9f7' } },
+        h('div', { style: { width: 'min(440px, 96vw)' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '.9rem', justifyContent: 'center', marginBottom: '1.5rem' } },
+            h('img', { src: window.SFJ_LOGO_DATA_URI, alt: 'Opportunity@Work', style: { height: '2.25rem', width: 'auto' } })),
+          h('div', { className: 'card', style: { background: '#fff', padding: '2rem' } },
+            h('h1', { className: 'u-text-style-h5 u-weight-medium', style: { margin: 0, textAlign: 'center' } }, st.settings.title),
+            h('p', { className: 'u-text-style-small u-color-faded', style: { textAlign: 'center', marginTop: '.4rem', marginBottom: '1.5rem' } }, 'Administrator sign-in'),
+            h('form', { onSubmit: submit, style: { display: 'flex', flexDirection: 'column', gap: '1rem' } },
+              h('div', null, lab('Email'), h('input', { type: 'email', value: st.loginEmail, onChange: e => this.setState({ loginEmail: e.target.value }), placeholder: 'admin@opportunityatwork.org', style: inp })),
+              h('div', null, lab('Password'), h('input', { type: 'password', value: st.loginPass, onChange: e => this.setState({ loginPass: e.target.value }), placeholder: 'Password', style: inp })),
+              h('button', { type: 'submit', style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.95rem', fontWeight: 500, padding: '.75rem', borderRadius: '100vw', border: '1.5px solid ' + ACC, background: ACC, color: '#fff', marginTop: '.25rem' } }, 'Sign in')),
+            h('p', { className: 'u-text-style-small u-color-faded', style: { textAlign: 'center', marginTop: '1.25rem', marginBottom: 0, lineHeight: 1.5 } }, 'Access is restricted to Opportunity@Work administrator accounts.')),
+          st.toast ? h('div', { className: 'sfj-fade', style: { textAlign: 'center', marginTop: '1rem', color: '#e03c32', fontSize: '.85rem' } }, st.toast) : null));
+    }
+  }
+
+  const root = ReactDOM.createRoot(document.getElementById('sfj-root'));
+  root.render(h(App));
+})();
+</script>
