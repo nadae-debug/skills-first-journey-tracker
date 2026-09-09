@@ -18,25 +18,54 @@ Apps Script as the thin server that reads/writes it and enforces roles.
 |---|---|
 | `companies.js` / `engagement.js` static files | Read live from the "Master Spreadsheet" / "Website Engagement" tabs on every load |
 | Client-side password hash-and-compare | Server-side session tokens (`Auth.gs`), password hashed+salted, checked only on the server |
-| Visitor (name+email, no password) + Administrator (email+password) roles | **Administrator-only.** The general/visitor login was removed — every account signs in with email + password, and every account is an administrator (added via Admin & data → Administrators). There is no lower-privilege role anymore. |
+| Visitor (name+email, no password) + Administrator (email+password) roles | **Open browsing, admin-gated editing.** There's no login gate at all for browsing — anyone with the URL sees the full journey/priority/resources/engagement/definitions content immediately. An "Admin login" button in the nav bar opens a small email+password form; only accounts in the Admins tab can sign in there, and only a signed-in administrator can edit records, see the activity log, manage admins, or view/post company comments. |
 | Per-browser activity log | Shared "Activity Log" tab, read/cleared by any signed-in administrator, written on every sign-in and action |
 | Per-browser favorites | Shared "Favorites" tab, keyed by signed-in email |
 | `mailto:` / external POST endpoint for email | Real send via Apps Script `MailApp`, no config needed |
 | N/A | New: a live "Comments" thread per company (shared, not local) |
 
+## Access model
+
+No login is required to open and browse the app — every viewer sees the
+Skills-First Journey directory, Priority Prospects, Ad Council Resources,
+Website Engagement, and Definitions pages immediately, with full
+search/filter/sort, CSV export, and per-company download.
+
+An **"Admin login"** button sits in the nav bar (top right). Clicking it
+opens a small email + password form; only accounts already in the `Admins`
+tab (added via Admin & data → Administrators, by an existing admin) can
+sign in there — there's no self-serve signup. Once signed in, the nav shows
+the administrator's name and a "Sign out" button instead, and these become
+available:
+- Add / edit / delete companies, import CSV
+- The "Activity log" and "Admin & data" nav tabs
+- Company comments (both viewing and posting — hidden entirely for
+  anonymous browsers, since there's no identity to authenticate a read/post)
+- Favorites (also hidden for anonymous browsers, for the same reason)
+- Real "Send email" (via `MailApp`) in the share dialog — anonymous
+  browsers still get "Copy" and "Open draft" (a client-side mailto link),
+  just not the server-side send, to keep the app's email quota from being
+  usable by anyone who happens to open the URL
+
+Every admin-only action is enforced server-side (`requireAdmin_(token)` in
+Auth.gs), not just hidden in the UI — a request forged without a valid
+admin session token is rejected regardless of what the client claims.
+
 ## Files
 
 - `appsscript.json` — manifest: runs as the deploying user, accessible to
-  anyone (even signed-out) — but the app's own login screen only accepts an
-  administrator email + password, so nothing is visible until someone signs
-  in with a real admin account. Needs the `spreadsheets` OAuth scope.
+  anyone (even signed-out) — the app itself shows all its content to anyone
+  who opens the URL; only editing/admin features are gated behind the "Admin
+  login" button in the nav bar. Needs the `spreadsheets` OAuth scope.
 - `Config.gs` — the workbook ID, tab names, stage/dimension constants. Edit
   `SHEET_ID` here if this is ever pointed at a different workbook.
 - `Util.gs` — shared helpers (header-indexed sheet reads, hashing, slugs).
 - `Auth.gs` — sessions (CacheService, 6h TTL) + administrator login + admin
   management. **This is where access control is actually enforced** — every
-  write endpoint calls `requireAdmin_(token)` first, and `api_login` is the
-  only way in (no visitor/general sign-in path exists).
+  admin-only endpoint calls `requireAdmin_(token)` first, so it's enforced
+  server-side even though the "Admin login" button in the nav is the only
+  UI path in. Reading company/engagement/etc. data needs no token at all —
+  only editing, comments, favorites, and real email-send require one.
 - `SheetData.gs` — reads/writes the "Master Spreadsheet" tab. Column mapping
   mirrors the prototype's old client-side sync 1:1, so it needs no changes
   to the existing workbook.
@@ -133,13 +162,15 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   A company only shows on the Priority Prospects page at all if its Top 10
   checkbox is set on Master Spreadsheet; this tab just supplies its ideas.
 - **Admins** — administrator accounts (name, email, salted password hash).
-  This is the only account type — there's no separate visitor/general login.
-- **Activity Log** — every sign-in / page view / company view / export /
-  download / comment, by every administrator (there's no unlogged role
-  anymore). Read/cleared by any signed-in administrator; append-only.
-- **Favorites** — per-user favorited companies, shared across that person's
-  devices.
-- **Comments** — the new live comment thread per company (see below).
+  Everyone else browses without any account at all — see Access model below.
+- **Activity Log** — every administrator sign-in / page view / company view
+  / export / download / comment (anonymous browsing isn't logged — there's
+  no identity to attribute it to). Read/cleared by any signed-in
+  administrator; append-only.
+- **Favorites** — per-admin favorited companies, shared across that person's
+  devices (hidden entirely for anonymous browsers — nothing to key it by).
+- **Comments** — the new live comment thread per company (see below) —
+  administrator-only, both to read and to post.
 - **App Overrides** — the handful of curated fields the live sheet doesn't
   carry: assessment history for the "Previous assessments" tabs, and two
   ad-hoc fields — a manual `website` and `parentNote` (e.g. YouTube's

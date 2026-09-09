@@ -90,6 +90,7 @@
         syncing: false, assessmentTab: 'current', engDetail: null, liveSync: null,
         commentCounts: {}, comments: {}, commentDraft: '', commentsLoadingFor: null,
         oppDrafts: {},
+        adminLoginOpen: false,
       };
       this.fileRef = React.createRef();
     }
@@ -128,7 +129,14 @@
       if (!this.state.auth) return;
       google.script.run.withFailureHandler(() => {}).api_track(this.token, action, target || '');
     }
-    openCompany(id) { const c = this.state.companies.find(x => x.id === id); this.track('Viewed company', c ? c.company : id); this.setState({ selectedId: id, assessmentTab: 'current', commentDraft: '' }); this.loadComments(id); }
+    openCompany(id) {
+      const c = this.state.companies.find(x => x.id === id);
+      this.track('Viewed company', c ? c.company : id);
+      this.setState({ selectedId: id, assessmentTab: 'current', commentDraft: '' });
+      // Comments are an internal admin thread — anonymous browsers have no
+      // identity to authenticate the read, so skip the fetch entirely.
+      if (this.state.auth && this.state.auth.role === 'admin') this.loadComments(id);
+    }
     // ---------- comments (live, shared — stored in the "Comments" sheet tab, never localStorage) ----------
     loadComments(id) {
       this.setState({ commentsLoadingFor: id });
@@ -213,8 +221,9 @@
           if (!res.ok) { this.flash(res.error || 'Sign-in failed'); return; }
           this.token = res.token;
           try { localStorage.setItem('sfj_token', this.token); } catch (e) {}
-          this.setState({ loginPass: '', page: 'journey' });
+          this.setState({ loginPass: '', loginEmail: '', adminLoginOpen: false, page: 'journey' });
           this.bootstrap();
+          this.flash('Signed in as administrator');
         })
         .withFailureHandler(err => this.flash('Sign-in failed: ' + ((err && err.message) || err)))
         .api_login(loginEmail, loginPass);
@@ -482,7 +491,6 @@
       }
       const ACC = (st.settings && st.settings.accent) || '#8c4799';
       const isAdmin = !!(st.auth && st.auth.role === 'admin');
-      if (!st.auth) return this.loginScreen(ACC);
       const companies = st.companies;
       const list = this.filtered();
       const selIds = this.selectedIds();
@@ -503,7 +511,8 @@
       const commentBadge = id => { const n = st.commentCounts[id]; if (!n) return null; return h('span', { title: n + ' comment' + (n === 1 ? '' : 's'), style: { display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, color: '#0f153b', background: '#eef0f4', border: '1.5px solid #cfd3dd', borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, commentIcon, n); };
       const favCount = Object.keys(st.favorites || {}).length;
       const star = (filled, sz) => h('svg', { width: sz || 18, height: sz || 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.4, strokeLinecap: 'round', style: { flex: '0 0 auto' } }, h('path', { d: 'M12 3.4V20.6 M4.55 7.7L19.45 16.3 M4.55 16.3L19.45 7.7' }));
-      const favBtn = id => h('button', { onClick: e => { e.stopPropagation(); this.toggleFavorite(id); }, title: this.isFav(id) ? 'Remove from favorites' : 'Add to favorites', style: { cursor: 'pointer', border: 'none', background: 'transparent', padding: '.15rem', lineHeight: 0, color: this.isFav(id) ? '#8c4799' : '#c3c6d0' } }, star(this.isFav(id), 18));
+      // Favorites need a signed-in identity to persist against — hidden for anonymous browsers.
+      const favBtn = id => !isAdmin ? null : h('button', { onClick: e => { e.stopPropagation(); this.toggleFavorite(id); }, title: this.isFav(id) ? 'Remove from favorites' : 'Add to favorites', style: { cursor: 'pointer', border: 'none', background: 'transparent', padding: '.15rem', lineHeight: 0, color: this.isFav(id) ? '#8c4799' : '#c3c6d0' } }, star(this.isFav(id), 18));
 
       const badge = (stage, small, tipText) => {
         const col = stage ? this.stageColor(stage) : '#9aa0b4';
@@ -609,7 +618,7 @@
         h('div', { className: 'u-hflex-between-center', style: { gap: '1rem', flexWrap: 'wrap' } },
           stageFilterChips,
           h('div', { style: { display: 'flex', gap: '1rem', alignItems: 'center' } },
-            h('button', { onClick: () => this.setState({ showFav: !st.showFav }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.42rem .8rem', borderRadius: '100vw', border: '1.5px solid ' + (st.showFav ? '#8c4799' : 'rgba(28,28,28,.2)'), background: st.showFav ? '#f3e9f5' : '#fff', color: '#0f153b', display: 'inline-flex', alignItems: 'center', gap: '.35rem' } }, h('span', { style: { color: '#8c4799', lineHeight: 0 } }, star(true, 14)), 'Favorites' + (favCount ? ' (' + favCount + ')' : '')),
+            isAdmin ? h('button', { onClick: () => this.setState({ showFav: !st.showFav }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.42rem .8rem', borderRadius: '100vw', border: '1.5px solid ' + (st.showFav ? '#8c4799' : 'rgba(28,28,28,.2)'), background: st.showFav ? '#f3e9f5' : '#fff', color: '#0f153b', display: 'inline-flex', alignItems: 'center', gap: '.35rem' } }, h('span', { style: { color: '#8c4799', lineHeight: 0 } }, star(true, 14)), 'Favorites' + (favCount ? ' (' + favCount + ')' : '')) : null,
             h('span', { className: 'u-text-style-small u-color-faded' }, list.length + ' shown'),
             segGroup([
               seg('cards', st.view === 'cards', () => this.setState({ view: 'cards' }), 'Cards'),
@@ -695,7 +704,9 @@
         h('div', { style: { fontSize: '.9rem', lineHeight: 1.5, color: '#0f153b', whiteSpace: 'pre-wrap' } }, val)) : null;
 
       // Comments — live, shared thread stored in the "Comments" sheet tab (see Comments.gs).
-      const commentsSection = sel ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+      // Internal admin working-thread — anonymous browsers get a note instead, since there's
+      // no identity to authenticate a read/post with and this content isn't meant to be public.
+      const commentsSection = !sel ? null : !isAdmin ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '.85rem 1.1rem', fontSize: '.82rem', color: '#6b6f80' } }, 'Sign in as an administrator to view and add team comments on this company.') : h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
         h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.6rem' } },
           'Comments' + ((st.comments[sel.id] || []).length ? ' (' + st.comments[sel.id].length + ')' : '')),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.6rem', marginBottom: '.85rem' } },
@@ -708,7 +719,7 @@
               : h('div', { style: { fontSize: '.8rem', color: '#9aa0b4' } }, 'No comments yet — be the first to leave one.')),
         h('div', { style: { display: 'flex', gap: '.5rem', alignItems: 'flex-start' } },
           h('textarea', { value: st.commentDraft, onChange: e => this.setState({ commentDraft: e.target.value }), placeholder: 'Add a comment…', rows: 2, style: { flex: 1, padding: '.55rem .8rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.85rem', resize: 'vertical', boxSizing: 'border-box' } }),
-          h('button', { onClick: () => this.addComment(sel.id), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid ' + ACC, background: ACC, color: '#fff', whiteSpace: 'nowrap' } }, 'Post'))) : null;
+          h('button', { onClick: () => this.addComment(sel.id), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid ' + ACC, background: ACC, color: '#fff', whiteSpace: 'nowrap' } }, 'Post')));
 
       const drawer = sel ? h('div', { onClick: () => this.setState({ selectedId: null }), style: { position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(8,11,32,.82)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '2.5vh 1rem' }, className: 'sfj-fade' },
         h('div', { onClick: e => e.stopPropagation(), className: 'sfj-pop', style: { width: 'min(920px, 96vw)', maxHeight: '95vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: '1rem', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,.45)' } },
@@ -767,7 +778,7 @@
             commentsSection,
             h('div', { style: { display: 'flex', gap: '.6rem', marginTop: '1.5rem', borderTop: '1.5px solid rgba(28,28,28,.1)', paddingTop: '1.25rem', flexWrap: 'wrap' } },
               engById[sel.id] ? actionBtn('View website engagement →', () => { const e = engById[sel.id]; this.setState({ page: 'engagement', engQ: e.company, engExpanded: { [e.company]: true }, selectedId: null }); window.scrollTo({ top: 0 }); }) : null,
-              actionBtn(this.isFav(sel.id) ? '★ Favorited' : '☆ Favorite', () => this.toggleFavorite(sel.id)),
+              isAdmin ? actionBtn(this.isFav(sel.id) ? '★ Favorited' : '☆ Favorite', () => this.toggleFavorite(sel.id)) : null,
               actionBtn('Download', () => this.downloadCompany(sel.id)),
               isAdmin ? actionBtn('Edit', () => this.startEdit(sel), true) : null,
               h('button', { onClick: () => this.remove(sel.id), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', display: isAdmin ? undefined : 'none' } }, 'Delete')))))
@@ -829,11 +840,11 @@
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.6rem' } }, lbl('How much detail?'),
               radio('summary', 'Summary', 'Classification, membership, and dimension summary for each company.'),
               radio('full', 'Full detail', 'Adds the full reasoning across all six dimensions plus source links.')),
-            h('div', { style: { fontSize: '.78rem', color: '#6b6f80', background: '#f9f9f7', borderRadius: '.6rem', padding: '.7rem .9rem' } }, '"Send email" delivers straight from the app (via Apps Script) to the address above. "Open draft" opens it in your own email client instead. Neither includes account owner, edge-case flags, or "where things stand now" — those stay internal.')),
+            h('div', { style: { fontSize: '.78rem', color: '#6b6f80', background: '#f9f9f7', borderRadius: '.6rem', padding: '.7rem .9rem' } }, (isAdmin ? '"Send email" delivers straight from the app (via Apps Script) to the address above. ' : '') + '"Open draft" opens it in your own email client instead. Neither includes account owner, edge-case flags, or "where things stand now" — those stay internal.')),
           h('div', { style: { padding: '1.25rem 1.75rem', borderTop: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'flex-end', gap: '.6rem', flexWrap: 'wrap' } },
             h('button', { onClick: () => this.copyShare(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.88rem', fontWeight: 500, padding: '.6rem 1.25rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Copy'),
             actionBtn('Open draft', () => this.openEmail()),
-            actionBtn(st.sending ? 'Sending…' : 'Send email', () => this.sendEmail(), true))) ) : null;
+            isAdmin ? actionBtn(st.sending ? 'Sending…' : 'Send email', () => this.sendEmail(), true) : null)) ) : null;
 
       const toast = st.toast ? h('div', { className: 'sfj-fade', style: { position: 'fixed', bottom: selIds.length ? '5rem' : '1.5rem', left: '50%', transform: 'translateX(-50%)', zIndex: 60, background: '#8c4799', color: '#fff', padding: '.75rem 1.5rem', borderRadius: '100vw', fontSize: '.88rem', boxShadow: '0 8px 30px rgba(0,0,0,.25)' } }, st.toast) : null;
       const hiddenFile = h('input', { ref: this.fileRef, type: 'file', accept: '.csv,text/csv', style: { display: 'none' }, onChange: ev => { const f = ev.target.files[0]; if (f) this.importCSV(f); ev.target.value = ''; } });
@@ -848,8 +859,11 @@
           h('div', { style: { display: 'flex', gap: '.25rem', padding: '.25rem', background: '#f0f0ee', borderRadius: '100vw', overflowX: 'auto', flex: '1 1 auto', minWidth: 0 } }, tabs.map(t => navTab(t[0], t[1]))),
           h('div', { style: { display: 'flex', gap: '.75rem', alignItems: 'center', flex: '0 0 auto' } },
             h('button', { onClick: () => this.refreshFromSheet(), disabled: st.syncing, title: st.liveSync ? (st.liveSync.ok ? 'Synced ' + new Date(st.liveSync.at).toLocaleTimeString() : 'Last sync failed: ' + st.liveSync.error) : 'Data loads live from the Google Sheet on every page load', style: { cursor: st.syncing ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 500, padding: '.4rem .85rem', borderRadius: '100vw', border: '1.5px solid ' + (st.liveSync && !st.liveSync.ok ? '#e03c32' : 'rgba(28,28,28,.12)'), background: '#fff', color: st.liveSync && !st.liveSync.ok ? '#e03c32' : '#6b6f80', whiteSpace: 'nowrap' } }, st.syncing ? 'Refreshing…' : (st.liveSync && !st.liveSync.ok ? '⚠ Refresh failed' : (st.liveSync ? '↻ Refreshed from Sheet' : '↻ Refresh from Sheet'))),
-            h('span', { style: { fontSize: '.8rem', color: '#6b6f80' } }, st.auth.name || st.auth.email),
-            h('button', { onClick: () => this.logout(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.82rem', fontWeight: 500, padding: '.42rem .9rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Sign out'))));
+            isAdmin
+              ? h(F, null,
+                  h('span', { style: { fontSize: '.8rem', color: '#6b6f80' } }, st.auth.name || st.auth.email),
+                  h('button', { onClick: () => this.logout(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.82rem', fontWeight: 500, padding: '.42rem .9rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Sign out'))
+              : h('button', { onClick: () => this.setState({ adminLoginOpen: true }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.82rem', fontWeight: 500, padding: '.42rem .9rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Admin login'))));
 
       const inp2 = { width: '100%', padding: '.55rem .8rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.88rem', background: '#fff', boxSizing: 'border-box' };
       const L2 = t => h('div', { style: { fontSize: '.75rem', fontWeight: 600, color: '#4a4e60', marginBottom: '.3rem' } }, t);
@@ -1044,27 +1058,20 @@
         : (st.page === 'activity' && isAdmin) ? activityPage
         : (st.page === 'admin' && isAdmin) ? adminPage
         : journey;
-      return h(F, null, nav, pageEl, drawer, engPopup, form, shareBar, shareModal, toast, hiddenFile);
-    }
 
-    loginScreen(ACC) {
-      const st = this.state;
-      const inp = { width: '100%', padding: '.7rem 1rem', borderRadius: '.6rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.95rem', background: '#fff', boxSizing: 'border-box' };
-      const lab = t => h('div', { style: { fontSize: '.78rem', fontWeight: 600, color: '#4a4e60', marginBottom: '.35rem' } }, t);
-      const submit = e => { e.preventDefault(); this.doLogin(); };
-      return h('div', { style: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 1rem', background: '#f9f9f7' } },
-        h('div', { style: { width: 'min(440px, 96vw)' } },
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: '.9rem', justifyContent: 'center', marginBottom: '1.5rem' } },
-            h('img', { src: window.SFJ_LOGO_DATA_URI, alt: 'Opportunity@Work', style: { height: '2.25rem', width: 'auto' } })),
-          h('div', { className: 'card', style: { background: '#fff', padding: '2rem' } },
-            h('h1', { className: 'u-text-style-h5 u-weight-medium', style: { margin: 0, textAlign: 'center' } }, st.settings.title),
-            h('p', { className: 'u-text-style-small u-color-faded', style: { textAlign: 'center', marginTop: '.4rem', marginBottom: '1.5rem' } }, 'Administrator sign-in'),
-            h('form', { onSubmit: submit, style: { display: 'flex', flexDirection: 'column', gap: '1rem' } },
-              h('div', null, lab('Email'), h('input', { type: 'email', value: st.loginEmail, onChange: e => this.setState({ loginEmail: e.target.value }), placeholder: 'admin@opportunityatwork.org', style: inp })),
-              h('div', null, lab('Password'), h('input', { type: 'password', value: st.loginPass, onChange: e => this.setState({ loginPass: e.target.value }), placeholder: 'Password', style: inp })),
-              h('button', { type: 'submit', style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.95rem', fontWeight: 500, padding: '.75rem', borderRadius: '100vw', border: '1.5px solid ' + ACC, background: ACC, color: '#fff', marginTop: '.25rem' } }, 'Sign in')),
-            h('p', { className: 'u-text-style-small u-color-faded', style: { textAlign: 'center', marginTop: '1.25rem', marginBottom: 0, lineHeight: 1.5 } }, 'Access is restricted to Opportunity@Work administrator accounts.')),
-          st.toast ? h('div', { className: 'sfj-fade', style: { textAlign: 'center', marginTop: '1rem', color: '#e03c32', fontSize: '.85rem' } }, st.toast) : null));
+      // ---- ADMIN LOGIN MODAL ---- (everyone else browses freely; this is the only way in)
+      const closeAdminLogin = () => this.setState({ adminLoginOpen: false, loginEmail: '', loginPass: '' });
+      const adminLoginModal = st.adminLoginOpen ? h('div', { onClick: closeAdminLogin, style: { position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,21,59,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }, className: 'sfj-fade' },
+        h('div', { onClick: ev => ev.stopPropagation(), style: { width: 'min(380px, 96vw)', background: '#fff', borderRadius: '1rem', boxShadow: '0 20px 60px rgba(0,0,0,.25)', overflow: 'hidden' } },
+          h('div', { style: { padding: '1.25rem 1.75rem', borderBottom: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+            h('span', { className: 'u-text-style-h6 u-weight-medium' }, 'Administrator sign-in'),
+            h('button', { onClick: closeAdminLogin, style: { cursor: 'pointer', border: 'none', background: '#f0f0ee', borderRadius: '100vw', width: '2.2rem', height: '2.2rem', fontSize: '1.1rem' } }, '×')),
+          h('form', { onSubmit: e => { e.preventDefault(); this.doLogin(); }, style: { padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' } },
+            h('div', null, lbl('Email'), h('input', { type: 'email', autoFocus: true, value: st.loginEmail, onChange: e => this.setState({ loginEmail: e.target.value }), placeholder: 'admin@opportunityatwork.org', style: inputStyle })),
+            h('div', null, lbl('Password'), h('input', { type: 'password', value: st.loginPass, onChange: e => this.setState({ loginPass: e.target.value }), placeholder: 'Password', style: inputStyle })),
+            h('button', { type: 'submit', style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.9rem', fontWeight: 500, padding: '.7rem', borderRadius: '100vw', border: '1.5px solid ' + ACC, background: ACC, color: '#fff', marginTop: '.15rem' } }, 'Sign in')))) : null;
+
+      return h(F, null, nav, pageEl, drawer, engPopup, form, shareBar, shareModal, adminLoginModal, toast, hiddenFile);
     }
   }
 
