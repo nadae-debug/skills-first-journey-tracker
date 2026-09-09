@@ -1,18 +1,19 @@
 /**
  * "App Overrides" tab — the one place the app stores curated extras that the
- * live Master Spreadsheet tab doesn't carry: assessment HISTORY
- * (previousAssessments), an optional manual website URL, and a parentNote
- * like YouTube's "Google is the TTPC partner, not YouTube itself". (Priority
- * prospect engagement ideas live in their OWN tab — see Opportunities.gs —
- * not here, so the team can track status/notes per idea.) Every other field
- * always comes straight from the live sheet on every bootstrap, so Master
- * Spreadsheet stays the single source of truth for current classifications
- * — these are additive, merged on top by companyId.
+ * live Master Spreadsheet tab doesn't carry: an optional manual `website`
+ * URL, and a `parentNote` like YouTube's "Google is the TTPC partner, not
+ * YouTube itself". (Priority prospect engagement ideas live in their OWN tab
+ * — see Opportunities.gs — and assessment history lives in its own tab too
+ * — see AssessmentHistory.gs — so the team can track those with real rows,
+ * not a JSON blob.) Every other field always comes straight from the live
+ * sheet on every bootstrap, so Master Spreadsheet stays the single source of
+ * truth for current classifications — these are additive, merged on top by
+ * companyId.
  *
  * One row per company id: CompanyId | ExtraJSON | UpdatedAt.
  */
 
-var OVERRIDE_KEYS = ['previousAssessments', 'website', 'parentNote'];
+var OVERRIDE_KEYS = ['website', 'parentNote'];
 
 function getOverrides_() {
   var sh = findSheet_(TAB_OVERRIDES);

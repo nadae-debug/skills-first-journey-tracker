@@ -74,6 +74,8 @@ admin session token is rejected regardless of what the client claims.
 - `Comments.gs` — reads/writes the "Comments" tab (new feature, see below).
 - `Opportunities.gs` — reads/writes the "Priority Prospect Opportunities"
   tab (see Data model below).
+- `AssessmentHistory.gs` — reads/writes the "Assessment History" tab (see
+  Data model below).
 - `Activity.gs`, `Settings.gs`, `Favorites.gs`, `Overrides.gs` — the other
   app-managed tabs (activity log, appearance settings, per-user favorites,
   and curated extras like assessment history that the live sheet doesn't
@@ -90,6 +92,29 @@ admin session token is rejected regardless of what the client claims.
   design_handoff README's instruction to "keep the exact state variables and
   render code" and swap only the data layer) — every `google.script.run`
   call replaces what used to be a `localStorage` read/write.
+
+## Configuration — no script properties needed
+
+Nothing in this project reads `PropertiesService` — there's no "Script
+properties" panel to fill in before it works. Every setting (`SHEET_ID`, tab
+names, session TTL, default admin) is a plain `var` constant at the top of
+`Config.gs`; edit that file directly (and redeploy) if any of it needs to
+change. The one thing you must set correctly is `SHEET_ID`, if this is ever
+pointed at a workbook other than the one it ships pointed at.
+
+**Freshness:** every `api_bootstrap` and `api_refresh` call (page load, and
+the nav bar's "Refresh from Sheet" button) reads Master Spreadsheet,
+Website Engagement, Definitions, Resources, Priority Prospect Opportunities,
+and Assessment History straight from `SpreadsheetApp` — nothing is cached.
+The only thing `CacheService` is used for is admin session tokens (`Auth.gs`),
+never company data, so there's no stale-data path to worry about: the app
+always reflects whatever is in the Sheet right now.
+
+**Historical reference:** that's exactly what the **Assessment History** tab
+(see Data model below) is for — a live, sheet-backed record of prior
+assessments per company, shown as the "Current / [prior date] / [prior
+date]" tabs in each company's detail card and referenced on the Website
+Engagement page, not something that has to be reconstructed from memory.
 
 ## Deploy
 
@@ -109,7 +134,8 @@ select `oneTimeSetup` in the function dropdown (top of the editor), and
 click Run. Grant the Sheets permission it asks for. This creates every
 app-managed tab (Admins, Activity Log, Settings, Favorites, App Overrides,
 Definitions, Resources, Comments, Website Engagement, Priority Prospect
-Opportunities) in the workbook named in `Config.gs`'s `SHEET_ID`, seeds
+Opportunities, Assessment History) in the workbook named in `Config.gs`'s
+`SHEET_ID`, seeds
 Definitions/Resources/Website Engagement from the prototype's shipped
 content, and creates the default administrator:
 
@@ -161,6 +187,23 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   resolve to the same company) — use the same company name you'd use there.
   A company only shows on the Priority Prospects page at all if its Top 10
   checkbox is set on Master Spreadsheet; this tab just supplies its ideas.
+- **Assessment History** — the "Current — [date] / [prior date] / [prior
+  date]" tab bar in a company's detail card, and the "Changes since last
+  assessment" summary, both read from here — one row per HISTORICAL
+  assessment (not the current one, which always comes live from Master
+  Spreadsheet). Columns: `Company | Date | Overall Classification | Summary
+  | Readiness Score | Sources | Categories JSON`. Only `Company`, `Date`,
+  and `Overall Classification` are required for an entry to show up;
+  `Summary` and `Readiness Score` add the reasoning text and score-change
+  line; `Sources` (one URL per line, or `|`-separated) lets `[n]` citations
+  in that entry's Summary resolve; `Categories JSON` is an advanced,
+  sheet-only field (paste an object shaped like `{"laborMarket":{"cls":"On
+  the Journey","why":"..."}, ...}`, keyed by the six dimension keys in
+  `Config.gs`'s `CATEGORY_KEYS`) if you want the per-dimension diff for that
+  historical entry too — most rows can leave it blank. Admins can also add a
+  row from the app itself: open a company's detail card → "+ Add a previous
+  assessment" (below the assessment tabs). `Company` matches the same way
+  as everywhere else (via the alias table in `SheetData.gs`).
 - **Admins** — administrator accounts (name, email, salted password hash).
   Everyone else browses without any account at all — see Access model below.
 - **Activity Log** — every administrator sign-in / page view / company view
@@ -171,10 +214,9 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   devices (hidden entirely for anonymous browsers — nothing to key it by).
 - **Comments** — the new live comment thread per company (see below) —
   administrator-only, both to read and to post.
-- **App Overrides** — the handful of curated fields the live sheet doesn't
-  carry: assessment history for the "Previous assessments" tabs, and two
-  ad-hoc fields — a manual `website` and `parentNote` (e.g. YouTube's
-  "Google is the TTPC partner" note).
+- **App Overrides** — the two remaining ad-hoc fields the live sheet doesn't
+  carry: a manual `website` and a `parentNote` (e.g. YouTube's "Google is
+  the TTPC partner" note).
 
 ## Comments (new)
 

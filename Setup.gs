@@ -36,6 +36,7 @@ function oneTimeSetup() {
   ensureTab_(ss, TAB_COMMENTS, ['CompanyId', 'Timestamp', 'WhoName', 'WhoEmail', 'Role', 'Comment']);
   ensureTab_(ss, TAB_ENGAGEMENT, engagementHeaders_());
   ensureTab_(ss, TAB_OPPORTUNITIES, OPPORTUNITY_HEADERS);
+  ensureTab_(ss, TAB_ASSESSMENT_HISTORY, ['Company', 'Date', 'Overall Classification', 'Summary', 'Readiness Score', 'Sources', 'Categories JSON']);
 
   seedDefinitionsIfEmpty_(ss);
   seedResourcesIfEmpty_(ss);

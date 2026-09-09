@@ -144,9 +144,11 @@ function readCompanies_() {
   });
   var overrides = getOverrides_();
   var opportunities = readOpportunitiesByCompanyId_();
+  var history = readAssessmentHistoryByCompanyId_();
   return Object.keys(byId).map(function (id) {
     var c = applyOverrides_(byId[id], overrides);
     if (opportunities[id]) c = Object.assign({}, c, { engagementIdeas: opportunities[id] });
+    if (history[id] && history[id].length) c = Object.assign({}, c, { previousAssessments: history[id] });
     return c;
   });
 }
@@ -214,7 +216,7 @@ function upsertCompany_(company) {
     setCell_(sh, row, headers, 'Opportunity@Work Point of Contact ' + n + ' (Name & Job Title)', formatPOC_((c.pointsOfContact || [])[n - 1]));
   }
   // Curated-only fields never touch the live sheet; they persist in App Overrides.
-  setOverride_(c.id, { previousAssessments: c.previousAssessments || [], website: c.website || '', parentNote: c.parentNote || '' });
+  setOverride_(c.id, { website: c.website || '', parentNote: c.parentNote || '' });
   // Engagement ideas live in their own tab (Priority Prospect Opportunities),
   // one row per idea with its own status/notes. Only touch it if the form's
   // idea LIST actually changed content — otherwise leave rows alone so an
