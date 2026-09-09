@@ -26,7 +26,6 @@ var TAB_DEFINITIONS = 'Definitions';
 var TAB_RESOURCES = 'Resources';
 var TAB_COMMENTS = 'Comments';
 var TAB_OPPORTUNITIES = 'Priority Prospect Opportunities';
-var TAB_ASSESSMENT_HISTORY = 'Assessment History';
 
 var STAGES = [
   "Hasn't begun the Journey",

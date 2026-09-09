@@ -90,7 +90,6 @@
         syncing: false, assessmentTab: 'current', engDetail: null, liveSync: null,
         commentCounts: {}, comments: {}, commentDraft: '', commentsLoadingFor: null,
         oppDrafts: {},
-        historyDraft: { date: '', classification: '', summary: '', score: '' },
         adminLoginOpen: false,
       };
       this.fileRef = React.createRef();
@@ -133,7 +132,7 @@
     openCompany(id) {
       const c = this.state.companies.find(x => x.id === id);
       this.track('Viewed company', c ? c.company : id);
-      this.setState({ selectedId: id, assessmentTab: 'current', commentDraft: '', historyDraft: { date: '', classification: '', summary: '', score: '' } });
+      this.setState({ selectedId: id, assessmentTab: 'current', commentDraft: '' });
       // Comments are an internal admin thread — anonymous browsers have no
       // identity to authenticate the read, so skip the fetch entirely.
       if (this.state.auth && this.state.auth.role === 'admin') this.loadComments(id);
@@ -165,18 +164,6 @@
         })))
         .withFailureHandler(err => this.flash('Could not add opportunity: ' + ((err && err.message) || err)))
         .api_addOpportunity(this.token, companyName, text);
-    }
-    // ---------- assessment history (live, shared — "Assessment History" sheet tab) ----------
-    addAssessmentHistory(id, companyName) {
-      const d = this.state.historyDraft;
-      if (!(d.date || '').trim() || !d.classification) { this.flash('Date and classification are required'); return; }
-      google.script.run
-        .withSuccessHandler(res => this.setState(s => ({
-          companies: s.companies.map(c => c.id === id ? Object.assign({}, c, { previousAssessments: res.previousAssessments }) : c),
-          historyDraft: { date: '', classification: '', summary: '', score: '' },
-        })))
-        .withFailureHandler(err => this.flash('Could not add assessment: ' + ((err && err.message) || err)))
-        .api_addAssessmentHistory(this.token, companyName, d.date, d.classification, d.summary, d.score);
     }
     downloadCompany(id) {
       const c = this.state.companies.find(x => x.id === id); if (!c) return;
@@ -748,14 +735,6 @@
             (sel.previousAssessments && sel.previousAssessments.length) ? h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '1.25rem', padding: '.3rem', background: '#f0f0ee', borderRadius: '100vw', width: 'fit-content' } },
               h('button', { onClick: () => this.setState({ assessmentTab: 'current' }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'current' ? '#8c4799' : 'transparent', color: assessmentTab === 'current' ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, 'Current — ' + (sel.lastReassessed || sel.assessmentDate || 'undated')),
               sel.previousAssessments.map((p, i) => h('button', { key: i, onClick: () => this.setState({ assessmentTab: 'prev' + i }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'prev' + i ? '#8c4799' : 'transparent', color: assessmentTab === 'prev' + i ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, p.date || 'Undated'))) : null,
-            isAdmin ? h('details', { style: { marginBottom: '1.25rem' } },
-              h('summary', { style: { cursor: 'pointer', fontSize: '.78rem', fontWeight: 600, color: '#8c4799' } }, '+ Add a previous assessment'),
-              h('div', { style: { display: 'grid', gridTemplateColumns: '9rem 1fr 7rem auto', gap: '.5rem', alignItems: 'end', marginTop: '.6rem' } },
-                h('div', null, h('label', { style: { fontSize: '.72rem', fontWeight: 600, color: '#4a4e60', display: 'block', marginBottom: '.2rem' } }, 'Date'), h('input', { value: st.historyDraft.date, onChange: e => this.setState(s => ({ historyDraft: Object.assign({}, s.historyDraft, { date: e.target.value }) })), placeholder: 'e.g. Mar 2026', style: inputStyle })),
-                h('div', null, h('label', { style: { fontSize: '.72rem', fontWeight: 600, color: '#4a4e60', display: 'block', marginBottom: '.2rem' } }, 'Classification'), h('select', { value: st.historyDraft.classification, onChange: e => this.setState(s => ({ historyDraft: Object.assign({}, s.historyDraft, { classification: e.target.value }) })), style: Object.assign({}, inputStyle, { cursor: 'pointer' }) }, [h('option', { key: '', value: '' }, 'Select…')].concat(this.STAGES.map(s => h('option', { key: s, value: s }, s))))),
-                h('div', null, h('label', { style: { fontSize: '.72rem', fontWeight: 600, color: '#4a4e60', display: 'block', marginBottom: '.2rem' } }, 'Score'), h('input', { value: st.historyDraft.score, onChange: e => this.setState(s => ({ historyDraft: Object.assign({}, s.historyDraft, { score: e.target.value }) })), placeholder: 'optional', style: inputStyle })),
-                h('button', { onClick: () => this.addAssessmentHistory(sel.id, sel.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid ' + ACC, background: ACC, color: '#fff', whiteSpace: 'nowrap' } }, 'Add')),
-              h('textarea', { value: st.historyDraft.summary, onChange: e => this.setState(s => ({ historyDraft: Object.assign({}, s.historyDraft, { summary: e.target.value }) })), placeholder: 'Summary of that assessment (optional)…', rows: 2, style: Object.assign({}, inputStyle, { marginTop: '.5rem', resize: 'vertical' }) })) : null,
             h('div', { style: { display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' } }, badge(activeAssess.overall), !activeAssess.isCurrent ? tag('Past assessment', '#9aa0b4') : null, sel.ttpc ? tag('TTPC partner', '#8c4799') : null, sel.adCouncil ? tag('Ad Council board', '#e87722') : null, sel.top10 ? tag('Top 10 priority', '#e03c32') : null, sel.industry ? h('span', { className: 'u-text-style-small u-color-faded' }, sel.industry) : null),
             (activeAssess.isCurrent && changesSinceLast) ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid ' + (changesSinceLast.items.length || changesSinceLast.scoreLine ? '#c7e3f0' : 'rgba(28,28,28,.1)'), background: (changesSinceLast.items.length || changesSinceLast.scoreLine) ? '#eef7fb' : '#f9f9f7', borderRadius: '.8rem', padding: '.85rem 1rem' } },
               h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#2b7ea1', marginBottom: '.5rem' } }, 'Changes since ' + (changesSinceLast.since || 'last assessment')),

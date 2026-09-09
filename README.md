@@ -74,12 +74,10 @@ admin session token is rejected regardless of what the client claims.
 - `Comments.gs` — reads/writes the "Comments" tab (new feature, see below).
 - `Opportunities.gs` — reads/writes the "Priority Prospect Opportunities"
   tab (see Data model below).
-- `AssessmentHistory.gs` — reads/writes the "Assessment History" tab (see
-  Data model below).
 - `Activity.gs`, `Settings.gs`, `Favorites.gs`, `Overrides.gs` — the other
   app-managed tabs (activity log, appearance settings, per-user favorites,
-  and curated extras like assessment history that the live sheet doesn't
-  carry).
+  and two curated extras — `website`/`parentNote` — that the live sheet
+  doesn't carry).
 - `Setup.gs` — **run once** after deploying (see Setup below).
 - `Seed.gs` / `Assets.gs` — one-time seed content (Definitions/Resources/
   Website Engagement starting data, ported from the prototype) and the
@@ -104,17 +102,20 @@ pointed at a workbook other than the one it ships pointed at.
 
 **Freshness:** every `api_bootstrap` and `api_refresh` call (page load, and
 the nav bar's "Refresh from Sheet" button) reads Master Spreadsheet,
-Website Engagement, Definitions, Resources, Priority Prospect Opportunities,
-and Assessment History straight from `SpreadsheetApp` — nothing is cached.
-The only thing `CacheService` is used for is admin session tokens (`Auth.gs`),
-never company data, so there's no stale-data path to worry about: the app
-always reflects whatever is in the Sheet right now.
+Website Engagement, Definitions, Resources, and Priority Prospect
+Opportunities straight from `SpreadsheetApp` — nothing is cached. The only
+thing `CacheService` is used for is admin session tokens (`Auth.gs`), never
+company data, so there's no stale-data path to worry about: the app always
+reflects whatever is in the Sheet right now.
 
-**Historical reference:** that's exactly what the **Assessment History** tab
-(see Data model below) is for — a live, sheet-backed record of prior
-assessments per company, shown as the "Current / [prior date] / [prior
-date]" tabs in each company's detail card and referenced on the Website
-Engagement page, not something that has to be reconstructed from memory.
+**Historical reference:** a company can have MORE THAN ONE row in Master
+Spreadsheet — one per assessment — differentiated by the `Is Current
+Assessment` column (see Data model below). The app groups rows by company,
+treats the one flagged current as live, and turns every other row into a
+"previous assessment" — shown as the "Current / [prior date] / [prior
+date]" tabs in each company's detail card, and referenced on the Website
+Engagement page. Nothing to reconstruct from memory: it's a live read of
+whatever rows exist for that company right now.
 
 ## Deploy
 
@@ -134,10 +135,14 @@ select `oneTimeSetup` in the function dropdown (top of the editor), and
 click Run. Grant the Sheets permission it asks for. This creates every
 app-managed tab (Admins, Activity Log, Settings, Favorites, App Overrides,
 Definitions, Resources, Comments, Website Engagement, Priority Prospect
-Opportunities, Assessment History) in the workbook named in `Config.gs`'s
-`SHEET_ID`, seeds
+Opportunities) in the workbook named in `Config.gs`'s `SHEET_ID`, seeds
 Definitions/Resources/Website Engagement from the prototype's shipped
 content, and creates the default administrator:
+
+**It does not add the `Is Current Assessment` column to Master
+Spreadsheet** — that tab is owned by the assessment team and `oneTimeSetup`
+never touches it. Add that column yourself (see Data model below) whenever
+you're ready to start tracking re-assessment history.
 
 - **admin@opportunityatwork.org** / **paperceiling**
 
@@ -162,7 +167,25 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
 - **Master Spreadsheet** (existing, owned by the assessment team) — company
   name, classifications/reasoning per dimension, board members, points of
   contact, sources, Top 10 flag/notes, etc. Read fresh on every page load;
-  written back on every admin save/delete/import.
+  written back on every admin save/delete/import. **A company can have more
+  than one row** — one per assessment, for a company that's been
+  re-assessed — differentiated by an **`Is Current Assessment`** column
+  (`Yes`/`No`, same convention as `TTPC Member`/`Top 10`). Add this column
+  yourself when you're ready to track history; it's not required — a
+  company with only one row (or with the column blank/missing entirely)
+  just has no assessment history, exactly like today. To record a
+  re-assessment: add a new row for that company with the new date/
+  classification/etc., mark it `Yes`, and change the old row's flag to
+  `No` (or leave it blank) — the app groups every row for a company by
+  name, treats the one flagged `Yes` as current (falling back to the
+  richest row if none is flagged, so existing single-row companies need no
+  changes), and turns every other row into a "previous assessment" —
+  visible as the "Current — [date] / [prior date] / [prior date]" tabs in
+  that company's detail card (users pick a date to see that assessment's
+  results) and referenced on the Website Engagement page. Admin
+  save/delete/CSV-import always act on the current row specifically, never
+  a historical one; deleting a company removes all of its rows, not just
+  the current one.
 - **Website Engagement** (created + seeded by `oneTimeSetup`) — per-company
   visit totals and top pages. Columns: `Company, Total Visits, Unique Pages,
   O&W Visits, TTPC Visits, Most Recent Week, Logo, Top Page 1 URL, Top Page
@@ -187,23 +210,6 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   resolve to the same company) — use the same company name you'd use there.
   A company only shows on the Priority Prospects page at all if its Top 10
   checkbox is set on Master Spreadsheet; this tab just supplies its ideas.
-- **Assessment History** — the "Current — [date] / [prior date] / [prior
-  date]" tab bar in a company's detail card, and the "Changes since last
-  assessment" summary, both read from here — one row per HISTORICAL
-  assessment (not the current one, which always comes live from Master
-  Spreadsheet). Columns: `Company | Date | Overall Classification | Summary
-  | Readiness Score | Sources | Categories JSON`. Only `Company`, `Date`,
-  and `Overall Classification` are required for an entry to show up;
-  `Summary` and `Readiness Score` add the reasoning text and score-change
-  line; `Sources` (one URL per line, or `|`-separated) lets `[n]` citations
-  in that entry's Summary resolve; `Categories JSON` is an advanced,
-  sheet-only field (paste an object shaped like `{"laborMarket":{"cls":"On
-  the Journey","why":"..."}, ...}`, keyed by the six dimension keys in
-  `Config.gs`'s `CATEGORY_KEYS`) if you want the per-dimension diff for that
-  historical entry too — most rows can leave it blank. Admins can also add a
-  row from the app itself: open a company's detail card → "+ Add a previous
-  assessment" (below the assessment tabs). `Company` matches the same way
-  as everywhere else (via the alias table in `SheetData.gs`).
 - **Admins** — administrator accounts (name, email, salted password hash).
   Everyone else browses without any account at all — see Access model below.
 - **Activity Log** — every administrator sign-in / page view / company view
