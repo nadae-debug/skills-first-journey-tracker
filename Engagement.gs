@@ -7,8 +7,18 @@
  *
  * Expected columns if/when a live tab is added: Company, Total Visits,
  * Unique Pages, O@W Visits, TTPC Visits, Most Recent Week, Top Pages (JSON
- * array of {url, visits}, or up to 5 "Top Page N URL"/"Top Page N Visits"
- * column pairs).
+ * array of {url, visits[, title]}, or up to 5 "Top Page N URL"/"Top Page N
+ * Visits" column pairs).
+ *
+ * A page shows as a hyperlink using its title/label, not the raw URL, so
+ * viewers get context without a wall of long URLs. Google Sheets' own
+ * rich-text hyperlinks (Insert > Link) can't be read back as separate
+ * display-text + URL through SpreadsheetApp, so — same convention as
+ * Resources' Link column (Definitions.gs) — type each "Top Page N URL" cell
+ * as `Page title | https://the/actual/url` and the title before the `|`
+ * becomes the link text; a bare URL with no `|` just shows the URL itself
+ * (protocol stripped), same as before this existed. The JSON "Top Pages"
+ * form can set the same thing directly via a "title" field per entry.
  */
 
 function readEngagement_() {
@@ -17,13 +27,15 @@ function readEngagement_() {
   var t = readTable_(sh);
   return t.rows.map(function (r) {
     var topPages = safeJsonParse_(get_(r, 'Top Pages'), null);
-    if (!topPages) {
+    if (topPages) {
+      topPages = topPages.map(function (p) { return { url: p.url, visits: p.visits, title: p.title || '' }; });
+    } else {
       topPages = [];
       for (var i = 1; i <= 5; i++) {
-        var url = get_(r, 'Top Page ' + i + ' URL');
-        if (!url) continue;
+        var parsed = parseLabeledUrl_(get_(r, 'Top Page ' + i + ' URL'));
+        if (!parsed) continue;
         var visits = get_(r, 'Top Page ' + i + ' Visits');
-        topPages.push({ url: url, visits: visits ? parseFloat(visits) : null });
+        topPages.push({ url: parsed.url, title: parsed.label, visits: visits ? parseFloat(visits) : null });
       }
     }
     var company = get_(r, 'Company');

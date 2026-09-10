@@ -45,22 +45,18 @@ var RESOURCE_SECTION_ALIASES = {
   'board-only': 'exclusive', 'board only': 'exclusive', 'exclusive': 'exclusive', 'board-only (exclusive)': 'exclusive',
 };
 
-/** One "Link" cell -> [{label, url}, ...]. Each non-blank line is a link;
- * `Label | URL` sets a friendly label, a bare URL uses itself as the label
- * (the client strips the protocol for display). Also accepts a "Links"
- * column name, in case that reads more naturally when adding it. */
+/** One "Link" cell -> [{label, url}, ...]. Each non-blank line is a link,
+ * parsed by the shared parseLabeledUrl_ (Util.gs) convention: `Label | URL`
+ * sets a friendly label, a bare URL uses itself as the label (the client
+ * strips the protocol for display). Also accepts a "Links" column name, in
+ * case that reads more naturally when adding it. */
 function parseResourceLinks_(raw) {
   raw = String(raw || '').trim();
   if (!raw) return [];
   var out = [];
   raw.split(/\r?\n/).forEach(function (line) {
-    line = line.trim();
-    if (!line) return;
-    var i = line.indexOf('|');
-    if (i === -1) { out.push({ label: '', url: line }); return; }
-    var label = line.slice(0, i).trim();
-    var url = line.slice(i + 1).trim();
-    if (url) out.push({ label: label, url: url });
+    var parsed = parseLabeledUrl_(line);
+    if (parsed) out.push(parsed);
   });
   return out;
 }

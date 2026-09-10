@@ -89,3 +89,24 @@ function safeJsonParse_(s, fallback) {
     return fallback;
   }
 }
+
+/**
+ * Shared "Label | URL" convention for any cell that holds a link a viewer
+ * should see as a readable name instead of the raw address — Google Sheets'
+ * own rich-text hyperlinks (Insert > Link) can't be read back through
+ * SpreadsheetApp as separate display-text + URL, so this plain-text
+ * convention is the workaround: type `Employer Hub | tearthepaperceiling.org/employers`
+ * and get both a friendly label and the real link. A bare URL with no `|`
+ * still works — the label just comes out empty, and callers fall back to
+ * showing the URL itself. Returns null for a blank cell, or
+ * { label, url } (label may be '').
+ */
+function parseLabeledUrl_(raw) {
+  raw = String(raw || '').trim();
+  if (!raw) return null;
+  var i = raw.indexOf('|');
+  if (i === -1) return { label: '', url: raw };
+  var label = raw.slice(0, i).trim();
+  var url = raw.slice(i + 1).trim();
+  return url ? { label: label, url: url } : null;
+}

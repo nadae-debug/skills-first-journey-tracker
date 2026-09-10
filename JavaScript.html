@@ -542,6 +542,12 @@
         });
       };
       const tip = (child, text, key) => text ? h('span', { key: key, className: 'sfj-tip', tabIndex: 0, style: { display: 'inline-flex', alignItems: 'center', gap: '.35rem' } }, child, h('span', { className: 'sfj-tipbox' }, text)) : child;
+      // A "top page" link — shows the page's title (Engagement.gs's
+      // parseLabeledUrl_ "Title | URL" convention on the Top Page N URL
+      // cells) instead of the raw URL, so viewers get context without a
+      // wall of long links; the actual URL is still the href and shows on
+      // hover, for anyone who wants to check it before clicking.
+      const pageLink = (p, style) => h('a', { href: /^https?:/i.test(p.url) ? p.url : 'https://' + p.url, target: '_blank', rel: 'noopener', title: p.url, className: 'sfj-link', style: Object.assign({ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, style) }, p.title || p.url.replace(/^https?:\/\//, ''));
       const engById = {}; this.ENG.forEach(e => { if (e.id) engById[e.id] = e; });
       const globe = h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', style: { flex: '0 0 auto' } }, h('circle', { cx: 12, cy: 12, r: 9 }), h('path', { d: 'M3 12h18' }), h('path', { d: 'M12 3c2.6 2.7 2.6 15.3 0 18c-2.6-2.7-2.6-15.3 0-18z' }));
       const engBadge = id => { const e = engById[id]; if (!e) return null; return h('span', { title: e.total + ' website visit' + (e.total === 1 ? '' : 's'), style: { display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, color: '#8c4799', background: '#f3e9f5', border: '1.5px solid #d9bfe0', borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, globe, e.total); };
@@ -915,7 +921,7 @@
                 engById[sel.id].oaw ? h('div', null, h('div', { style: { fontSize: '1.15rem', fontWeight: 600, color: '#8c4799' } }, engById[sel.id].oaw), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'O@W visits')) : null,
                 engById[sel.id].ttpc ? h('div', null, h('div', { style: { fontSize: '1.15rem', fontWeight: 600, color: '#e87722' } }, engById[sel.id].ttpc), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'Tear the Paper Ceiling visits')) : null,
                 engById[sel.id].recentWeek ? h('div', null, h('div', { style: { fontSize: '.85rem', fontWeight: 500, color: '#0f153b', marginTop: '.15rem' } }, engById[sel.id].recentWeek), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'most recent activity')) : null),
-              engById[sel.id].topPages.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.3rem' } }, engById[sel.id].topPages.slice(0, 5).map((p, i) => h('div', { key: i, style: { display: 'flex', gap: '.5rem', fontSize: '.8rem', alignItems: 'baseline' } }, h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#4a4e60' } }, p.page || p.url || p.path), p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits + (p.visits === 1 ? ' visit' : ' visits')) : null))) : null) : null,
+              engById[sel.id].topPages.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.3rem' } }, engById[sel.id].topPages.slice(0, 5).map((p, i) => h('div', { key: i, style: { display: 'flex', gap: '.5rem', fontSize: '.8rem', alignItems: 'baseline' } }, pageLink(p, { flex: 1, color: '#4a4e60' }), p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits + (p.visits === 1 ? ' visit' : ' visits')) : null))) : null) : null,
             field(activeAssess.isCurrent ? 'Current assessment date' : 'Assessment date', activeAssess.isCurrent ? (sel.lastReassessed || sel.assessmentDate) : activeAssess.date),
             field('Overall classification reasoning', linkify(activeAssess.overallWhy, activeAssess.sources)),
             activeAssess.isCurrent ? field("What we've done together", sel.doneTogether) : null,
@@ -1092,7 +1098,7 @@
         e.topPages.length ? h('div', null,
           h('div', { style: { fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.4rem' } }, 'Top pages'),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.3rem' } }, e.topPages.slice(0, 5).map((p, i) => h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', gap: '.6rem', fontSize: '.8rem' } },
-            h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#4a4e60' } }, p.url),
+            pageLink(p, { color: '#4a4e60' }),
             p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits) : null)))) : null); };
       const engGrid = h('div', { className: 'u-grid-column-3', style: { marginTop: '1.5rem' } }, engList.map(engCard));
 
@@ -1123,7 +1129,7 @@
             ed.topPages.length ? h('div', { style: { marginBottom: '1.5rem' } },
               h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.5rem' } }, 'Top pages visited'),
               h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.4rem' } }, ed.topPages.map((p, i) => h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '.85rem' } },
-                h('a', { href: /^https?:/i.test(p.url) ? p.url : 'https://' + p.url, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { wordBreak: 'break-all' } }, p.url),
+                pageLink(p, { wordBreak: 'break-all', whiteSpace: 'normal' }),
                 p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits + (p.visits === 1 ? ' visit' : ' visits')) : null)))) : null,
             ed.id ? h('div', { style: { borderTop: '1.5px solid rgba(28,28,28,.1)', paddingTop: '1.1rem' } }, actionBtn('View skills-first journey profile →', () => { this.setState({ engDetail: null }); this.openCompany(ed.id); }, true)) : h('div', { className: 'u-text-style-small u-color-faded' }, 'No matching skills-first journey record for this company yet.'))))
         : null;

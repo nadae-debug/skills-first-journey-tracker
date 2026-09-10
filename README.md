@@ -265,7 +265,16 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   O&W Visits, TTPC Visits, Most Recent Week, Logo, Top Page 1 URL, Top Page
   1 Visits, … Top Page 5 URL, Top Page 5 Visits`. Edit rows here (or ask
   whoever owns the site-analytics export to update it) and the app picks it
-  up on next load/refresh — nothing to redeploy.
+  up on next load/refresh — nothing to redeploy. Each `Top Page N URL` cell
+  also accepts the same `Label | URL` convention as Resources' Link column
+  (see below) — type `Employer Hub | tearthepaperceiling.org/employers` and
+  the page shows as a hyperlink reading "Employer Hub" instead of the raw
+  URL (the real URL is still the link's target and shows on hover); a bare
+  URL with no `|` still works, it just displays as the URL itself. This is
+  a plain-text workaround, not a limitation you're hitting by accident —
+  Google Sheets' own rich-text hyperlinks (Insert > Link) can't be read
+  back as separate display-text + URL through the Sheets API, so there's
+  no way for the app to "just see" a native Sheets hyperlink's title.
 - **Definitions** / **Resources** — the classification rubric and the Ad
   Council resources-page copy. Editable directly in Sheets; changes show up
   live, no code change. **Resources** columns: `Section | Title | Body |
