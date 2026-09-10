@@ -29,13 +29,23 @@ Apps Script as the thin server that reads/writes it and enforces roles.
 The site has a **front gate**: on first load, everyone sees a name + email
 form (no password). The email must be at one of `ALLOWED_EMAIL_DOMAINS`
 (`Config.gs` — currently `opportunityatwork.org` and `adcouncil.org`,
-subdomains included) or entry is refused with an explanatory message. This
-is enforced server-side by `api_enter` in `Auth.gs` — the check happens on
-the email the server receives, not on anything the client claims — and
-`api_bootstrap`/`api_refresh` (`Code.gs`) both refuse to return any company/
-engagement/etc. data to a caller without a valid session, so there's no way
-to read live data by calling the API directly without first passing the
-gate.
+subdomains included) or entry is refused. This is enforced server-side by
+`api_enter` in `Auth.gs` — the check happens on the email the server
+receives, not on anything the client claims — and `api_bootstrap`/
+`api_refresh` (`Code.gs`) both refuse to return any company/engagement/etc.
+data to a caller without a valid session, so there's no way to read live
+data by calling the API directly without first passing the gate.
+
+**The rejection message and the form itself are deliberately vague** — a
+domain allow-list is a soft gate (an email at the right domain is enough;
+there's no real per-person auth behind it), not a firewall, so the UI must
+not confirm that or name the allowed domains. If someone typos or uses a
+personal email, `api_enter`'s error just says access couldn't be verified
+and to contact the team — it doesn't say "wrong domain" or list which
+domains work, and the entry form's email placeholder is a generic
+`name@example.com`, not a real address at either domain. Don't restore a
+more "helpful" or specific message here — that would hand anyone the exact
+rule needed to get past the gate.
 
 Once entered (role `'member'`), everyone gets:
 - Full read access to the Skills-First Journey directory, Priority

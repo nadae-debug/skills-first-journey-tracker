@@ -83,7 +83,12 @@ function api_enter(name, email) {
   email = String(email || '').trim().toLowerCase();
   if (!name || !email) return { ok: false, error: 'Enter your name and email.' };
   if (!emailDomainAllowed_(email)) {
-    return { ok: false, error: 'Access is restricted to Opportunity@Work (@opportunityatwork.org) and Ad Council (@adcouncil.org) email addresses.' };
+    // Deliberately vague — this is a domain allow-list, not real
+    // authentication, so the rejection message must not confirm that or
+    // name the allowed domains; that'd hand anyone the exact rule to get
+    // past it. Keep this generic no matter how tempting a more helpful
+    // message is.
+    return { ok: false, error: "We couldn't verify your access with that email. Double-check it, or reach out to your Opportunity@Work or Ad Council contact for help." };
   }
   var auth = { name: name, email: email, role: 'member' };
   var token = putSession_(auth);
