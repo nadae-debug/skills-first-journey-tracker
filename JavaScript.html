@@ -83,7 +83,7 @@
         stageFilter: {}, sort: { key: 'company', dir: 1 }, stageChartType: 'bar',
         selectedId: null, editing: null, isNew: false, toast: '',
         selected: {}, shareOpen: false, shareTo: '', shareMsg: '', shareDetail: 'summary',
-        page: 'journey', engQ: '', engSort: { key: 'total', dir: -1 }, engExpanded: {},
+        page: 'journey', engQ: '', engSort: { key: 'total', dir: -1 }, engExpanded: {}, resourceLinkSel: {},
         auth: null, admins: [], activity: [],
         favorites: {}, showFav: false,
         settings: { title: 'Skills-First Journey Tracker', accent: '#8c4799' },
@@ -402,12 +402,32 @@
       if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => this.flash('Copied ' + rows.length + ' companies to clipboard')).catch(() => this.flash('Copy failed — try Open email'));
       else this.flash('Clipboard not available');
     }
-    // Ad Council Resources page — a resource's Link (Resources sheet tab)
-    // one-click copy, so a board member can grab and share it without
-    // hunting for the source themselves.
+    // Ad Council Resources page — a resource's Link(s) (Resources sheet
+    // tab, one per line) get one-click copy, so a board member can grab
+    // and share them without hunting for the source themselves. A resource
+    // can carry more than one link; copyLink handles a single one, copyLinks
+    // handles "Copy all" / "Copy selected" for several at once, and
+    // toggleResourceLink tracks which checkboxes are checked per resource
+    // (keyed by title — resource titles are already used as the list key
+    // elsewhere on this page, so they're assumed unique here too).
     copyLink(url) {
       if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => this.flash('Link copied')).catch(() => this.flash('Could not copy — select and copy the link manually'));
       else this.flash('Clipboard not available — select and copy the link manually');
+    }
+    copyLinks(urls) {
+      if (!urls.length) return;
+      const text = urls.join('\n');
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => this.flash('Copied ' + urls.length + ' link' + (urls.length === 1 ? '' : 's'))).catch(() => this.flash('Could not copy — select and copy manually'));
+      else this.flash('Clipboard not available — select and copy manually');
+    }
+    toggleResourceLink(itemKey, idx) {
+      this.setState(s => {
+        const sel = Object.assign({}, s.resourceLinkSel);
+        const cur = Object.assign({}, sel[itemKey]);
+        cur[idx] = !cur[idx];
+        sel[itemKey] = cur;
+        return { resourceLinkSel: sel };
+      });
     }
 
     // ---------- mutations (write through to the Sheet via SheetData.gs) ----------
@@ -1170,15 +1190,29 @@
 
       // ---- AD COUNCIL RESOURCES PAGE ----
       const RES = this.RES;
+      const smallBtn = (label, on, primary) => h('button', { onClick: on, style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.72rem', fontWeight: 500, padding: '.2rem .6rem', borderRadius: '100vw', border: '1.5px solid ' + (primary ? '#8c4799' : 'rgba(28,28,28,.18)'), background: primary ? '#8c4799' : '#fff', color: primary ? '#fff' : '#0f153b', flex: '0 0 auto', whiteSpace: 'nowrap' } }, label);
+      const resourceLinks = item => {
+        const links = item.links || [];
+        if (!links.length) return null;
+        const key = item.title;
+        const sel = (st.resourceLinkSel || {})[key] || {};
+        const checkedUrls = links.filter((l, i) => sel[i]).map(l => l.url);
+        return h('div', { style: { marginTop: '.65rem', display: 'flex', flexDirection: 'column', gap: '.4rem' } },
+          links.map((l, i) => h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap' } },
+            links.length > 1 ? h('input', { type: 'checkbox', checked: !!sel[i], onChange: () => this.toggleResourceLink(key, i), style: { width: '1rem', height: '1rem', cursor: 'pointer', accentColor: '#8c4799', flex: '0 0 auto' } }) : null,
+            h('a', { href: /^https?:/i.test(l.url) ? l.url : 'https://' + l.url, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.8rem', wordBreak: 'break-all', minWidth: 0 } }, l.label || l.url.replace(/^https?:\/\//, '')),
+            smallBtn('Copy', () => this.copyLink(l.url)))),
+          links.length > 1 ? h('div', { style: { display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginTop: '.15rem' } },
+            smallBtn('Copy all (' + links.length + ')', () => this.copyLinks(links.map(l => l.url))),
+            checkedUrls.length ? smallBtn('Copy selected (' + checkedUrls.length + ')', () => this.copyLinks(checkedUrls), true) : null) : null);
+      };
       const resourceCard = (item, color) => h('div', { key: item.title, className: 'card', style: { padding: '1.25rem 1.4rem', background: '#fff' } },
         h('div', { style: { display: 'flex', gap: '.6rem', alignItems: 'flex-start' } },
           h('span', { style: { width: '.55rem', height: '.55rem', borderRadius: '100vw', background: color, flex: '0 0 auto', marginTop: '.45rem' } }),
           h('div', { style: { minWidth: 0, flex: 1 } },
             h('div', { className: 'u-weight-medium', style: { fontSize: '.95rem', marginBottom: '.3rem' } }, item.title),
             h('p', { className: 'u-text-style-small u-color-faded', style: { margin: 0 } }, item.body),
-            item.link ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '.5rem', marginTop: '.65rem', flexWrap: 'wrap' } },
-              h('a', { href: /^https?:/i.test(item.link) ? item.link : 'https://' + item.link, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.8rem', wordBreak: 'break-all', minWidth: 0 } }, item.link.replace(/^https?:\/\//, '')),
-              h('button', { onClick: () => this.copyLink(item.link), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.72rem', fontWeight: 500, padding: '.2rem .6rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.18)', background: '#fff', color: '#0f153b', flex: '0 0 auto' } }, 'Copy link')) : null)));
+            resourceLinks(item))));
       const resourceSection = (eyebrow, heading, items, color) => h('div', { style: { marginBottom: '3rem' } },
         h('div', { className: 'g-eyebrow', style: { marginBottom: '.6rem' } }, eyebrow),
         h('h2', { className: 'u-text-style-h5 u-weight-medium', style: { margin: '0 0 1.25rem' } }, heading),

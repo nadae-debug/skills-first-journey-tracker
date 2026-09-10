@@ -69,7 +69,10 @@ function seedResourcesIfEmpty_(ss) {
   var labels = { universalMenu: 'Universal menu', turnkey: 'Turnkey (before joining TTPC)', exclusive: 'Board-only (exclusive)' };
   var rows = [];
   ['universalMenu', 'turnkey', 'exclusive'].forEach(function (section) {
-    (RESOURCES_SEED[section] || []).forEach(function (item) { rows.push([labels[section], item.title, item.body, item.link || '']); });
+    (RESOURCES_SEED[section] || []).forEach(function (item) {
+      var linkCell = (item.links || []).map(function (l) { return l.label ? l.label + ' | ' + l.url : l.url; }).join('\n');
+      rows.push([labels[section], item.title, item.body, linkCell]);
+    });
   });
   if (rows.length) sh.getRange(2, 1, rows.length, 4).setValues(rows);
 }

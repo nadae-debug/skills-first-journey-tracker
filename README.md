@@ -273,15 +273,22 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   / "Before joining TTPC", or "Board-only" / "Exclusive"; a misspelled
   Section value just means that row silently doesn't show, so double-check
   it against those three if a row you added doesn't appear. `Link` is
-  optional — paste a URL there and that resource shows a clickable link
-  plus a one-click "Copy link" button on the Resources page, so board
-  members can grab and share it without digging for the source themselves;
-  leave it blank for a resource that isn't a specific URL (e.g. "Host or
-  speak at a coalition event"). If your Resources tab predates this column,
-  just add a `Link` header cell yourself — the app reads by header name, so
-  it picks it up immediately, no code change or redeploy needed for the
-  data itself (existing rows are untouched; only new/edited rows need a
-  value in it).
+  optional and holds **one or more** links for that resource — put each
+  link on its own line within the cell (in Sheets, Alt+Enter adds a line
+  break without leaving the cell); each line is either a bare URL or
+  `Label | URL` if you want a friendlier label than the raw link (e.g.
+  `Pledge form | https://tearthepaperceiling.org/pledge`). The Resources
+  page shows every link as its own clickable line with a "Copy" button;
+  once a resource has 2+ links it also gets "Copy all" and — after
+  checking off a subset — "Copy selected" buttons, so board members can
+  grab exactly the links they need without digging for the source
+  themselves. Leave the cell blank for a resource that isn't a specific
+  URL (e.g. "Host or speak at a coalition event"). If your Resources tab
+  predates this column, just add a `Link` header cell yourself (`Links`
+  also works, if that reads more naturally) — the app reads by header
+  name, so it picks it up immediately, no code change or redeploy needed
+  for the data itself (existing rows are untouched; only new/edited rows
+  need a value in it).
 - **Priority Prospect Opportunities** — explicit engagement ideas for **any**
   company (not only ones flagged as a priority account), one row per idea.
   Columns: `Company | Opportunity | Status | Notes | Added By | Added Date`.
