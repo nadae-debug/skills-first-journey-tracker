@@ -271,17 +271,23 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   list has grown past ten companies); `top10`/`top10Notes` stay the field
   names in code too, for the same reason. **A company can have more
   than one row** — one per assessment, for a company that's been
-  re-assessed — differentiated by an **`Is Current Assessment`** column
-  (`Yes`/`No`, same convention as `TTPC Member`/`Top 10`). Add this column
-  yourself when you're ready to track history; it's not required — a
-  company with only one row (or with the column blank/missing entirely)
-  just has no assessment history, exactly like today. To record a
-  re-assessment: add a new row for that company with the new date/
-  classification/etc., mark it `Yes`, and change the old row's flag to
-  `No` (or leave it blank) — the app groups every row for a company by
-  name, treats the one flagged `Yes` as current (falling back to the
-  richest row if none is flagged, so existing single-row companies need no
-  changes), and turns every other row into a "previous assessment" —
+  re-assessed — differentiated by a current-assessment flag, recognized
+  under **either** of two conventions (`isCurrentAssessment_` in
+  `SheetData.gs`): an **`Is Current Assessment`** column (`Yes`/`No`, same
+  convention as `TTPC Member`/`Top 10`), or a **`Skills-First Journey
+  Assessment`** column reading `Current Assessment` / `Previous (Archived)
+  Assessment` — the label the assessment team's own re-assessment tracking
+  already uses. Add either column yourself when you're ready to track
+  history; neither is required — a company with only one row (or with
+  both columns blank/missing entirely) just has no assessment history,
+  exactly like today. To record a re-assessment: add a new row for that
+  company with the new date/classification/etc., flag it current under
+  whichever convention your sheet uses, and flag the old row not-current
+  (or leave it blank) — the app groups every row for a company by name,
+  treats the one flagged current as current (falling back to the richest
+  row if **neither** column has a value on **any** row for that company,
+  so existing single-row companies need no changes), and turns every
+  other row into a "previous assessment" —
   visible as the "Current — [date] / [prior date] / [prior date]" tabs in
   that company's detail card (users pick a date to see that assessment's
   results) and referenced on the Website Engagement page. Admin

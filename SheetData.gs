@@ -39,6 +39,12 @@ var COL_TOP10 = 'Top 10';
 // this column existed, so nothing has to change for companies with only one
 // row on file yet.
 var COL_IS_CURRENT = 'Is Current Assessment';
+// The assessment team's own re-assessment tracking tab actually uses a
+// different column/value convention for the same concept: a
+// "Skills-First Journey Assessment" column reading "Current Assessment"
+// vs. "Previous (Archived) Assessment" (rather than "Is Current
+// Assessment" Yes/No). Recognize both — see isCurrentAssessment_ below.
+var COL_IS_CURRENT_ALT = 'Skills-First Journey Assessment';
 var SOURCE_LINK_COUNT = 17;
 var POC_SLOT_COUNT = 5;
 
@@ -74,6 +80,21 @@ function parsePOC_(s) {
 function formatPOC_(p) {
   if (!p || !p.name) return '';
   return p.title ? p.name + ' — ' + p.title : p.name;
+}
+
+/** True if this row is explicitly flagged current, under either
+ * convention: COL_IS_CURRENT ("Is Current Assessment" / Yes-No) or
+ * COL_IS_CURRENT_ALT ("Skills-First Journey Assessment" / "Current
+ * Assessment" vs. "Previous (Archived) Assessment"). Returns null (not
+ * false) when neither column has a value on this row, so the caller can
+ * tell "explicitly not current" apart from "no flag at all" — the latter
+ * is what falls back to the richness heuristic. */
+function isCurrentAssessment_(r) {
+  var raw = get_(r, COL_IS_CURRENT);
+  if (raw) return yes_(raw);
+  var alt = get_(r, COL_IS_CURRENT_ALT);
+  if (alt) return /^current/i.test(alt.trim());
+  return null;
 }
 
 function richness_(c) {
@@ -151,8 +172,7 @@ function readCompanies_() {
       top10: get_(r, COL_TOP10) === '1' || yes_(get_(r, COL_TOP10)), top10Notes: get_(r, 'Top 10 Notes'),
       lastChangeDirection: get_(r, 'Last Change Direction'), latestChangeSummary: get_(r, 'Latest Change Summary'),
     });
-    var isCurrentRaw = get_(r, COL_IS_CURRENT);
-    var entry = { cand: cand, isCurrentFlag: isCurrentRaw ? yes_(isCurrentRaw) : false, row: r.__row };
+    var entry = { cand: cand, isCurrentFlag: !!isCurrentAssessment_(r), row: r.__row };
     if (!groups[id]) groups[id] = [];
     groups[id].push(entry);
   });
@@ -199,7 +219,7 @@ function findRowForId_(sh, companyId) {
     return rawName && slugify_(canonicalName_(rawName)) === companyId;
   });
   if (!matches.length) return 0;
-  var flagged = matches.filter(function (r) { return yes_(get_(r, COL_IS_CURRENT)); });
+  var flagged = matches.filter(function (r) { return isCurrentAssessment_(r); });
   var pool = flagged.length ? flagged : matches;
   return pool[pool.length - 1].__row; // last (most recently edited) match in the pool
 }
