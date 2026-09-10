@@ -291,6 +291,13 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   Google Sheets' own rich-text hyperlinks (Insert > Link) can't be read
   back as separate display-text + URL through the Sheets API, so there's
   no way for the app to "just see" a native Sheets hyperlink's title.
+  These links work the same way (title shown, real URL as the target) on
+  every page and card that lists top pages — the Website Engagement page's
+  per-company cards, a company's detail card, and the engagement detail
+  popup — and on Resources' links too. All of them stop a link click from
+  also triggering whatever click handler the card itself has (several of
+  these cards open a drawer/popup on any click), so clicking a link just
+  opens it, the same as clicking any other link on the page.
 - **Definitions** / **Resources** — the classification rubric and the Ad
   Council resources-page copy. Editable directly in Sheets; changes show up
   live, no code change. **Resources** columns: `Section | Title | Body |

@@ -571,7 +571,12 @@
       // cells) instead of the raw URL, so viewers get context without a
       // wall of long links; the actual URL is still the href and shows on
       // hover, for anyone who wants to check it before clicking.
-      const pageLink = (p, style) => h('a', { href: /^https?:/i.test(p.url) ? p.url : 'https://' + p.url, target: '_blank', rel: 'noopener', title: p.url, className: 'sfj-link', style: Object.assign({ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, style) }, p.title || p.url.replace(/^https?:\/\//, ''));
+      // onClick here only stops the click from bubbling to a clickable
+      // ancestor (several cards this renders inside — e.g. the Website
+      // Engagement page's per-company card — open a drawer/popup on any
+      // click of their own); it doesn't touch the link's own navigation,
+      // so the browser still opens the URL normally either way.
+      const pageLink = (p, style) => h('a', { href: /^https?:/i.test(p.url) ? p.url : 'https://' + p.url, target: '_blank', rel: 'noopener', title: p.url, className: 'sfj-link', onClick: e => e.stopPropagation(), style: Object.assign({ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, style) }, p.title || p.url.replace(/^https?:\/\//, ''));
       const engById = {}; this.ENG.forEach(e => { if (e.id) engById[e.id] = e; });
       const globe = h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', style: { flex: '0 0 auto' } }, h('circle', { cx: 12, cy: 12, r: 9 }), h('path', { d: 'M3 12h18' }), h('path', { d: 'M12 3c2.6 2.7 2.6 15.3 0 18c-2.6-2.7-2.6-15.3 0-18z' }));
       const engBadge = id => { const e = engById[id]; if (!e) return null; return h('span', { title: e.total + ' website visit' + (e.total === 1 ? '' : 's'), style: { display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, color: '#8c4799', background: '#f3e9f5', border: '1.5px solid #d9bfe0', borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, globe, e.total); };
@@ -1229,12 +1234,12 @@
         const checkedUrls = links.filter((l, i) => sel[i]).map(l => l.url);
         return h('div', { style: { marginTop: '.65rem', display: 'flex', flexDirection: 'column', gap: '.4rem' } },
           links.map((l, i) => h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap' } },
-            links.length > 1 ? h('input', { type: 'checkbox', checked: !!sel[i], onChange: () => this.toggleResourceLink(key, i), style: { width: '1rem', height: '1rem', cursor: 'pointer', accentColor: '#8c4799', flex: '0 0 auto' } }) : null,
-            h('a', { href: /^https?:/i.test(l.url) ? l.url : 'https://' + l.url, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.8rem', wordBreak: 'break-all', minWidth: 0 } }, l.label || l.url.replace(/^https?:\/\//, '')),
-            smallBtn('Copy', () => this.copyLink(l.url)))),
+            links.length > 1 ? h('input', { type: 'checkbox', checked: !!sel[i], onClick: e => e.stopPropagation(), onChange: () => this.toggleResourceLink(key, i), style: { width: '1rem', height: '1rem', cursor: 'pointer', accentColor: '#8c4799', flex: '0 0 auto' } }) : null,
+            h('a', { href: /^https?:/i.test(l.url) ? l.url : 'https://' + l.url, target: '_blank', rel: 'noopener', className: 'sfj-link', onClick: e => e.stopPropagation(), style: { fontSize: '.8rem', wordBreak: 'break-all', minWidth: 0 } }, l.label || l.url.replace(/^https?:\/\//, '')),
+            smallBtn('Copy', e => { e.stopPropagation(); this.copyLink(l.url); }))),
           links.length > 1 ? h('div', { style: { display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginTop: '.15rem' } },
-            smallBtn('Copy all (' + links.length + ')', () => this.copyLinks(links.map(l => l.url))),
-            checkedUrls.length ? smallBtn('Copy selected (' + checkedUrls.length + ')', () => this.copyLinks(checkedUrls), true) : null) : null);
+            smallBtn('Copy all (' + links.length + ')', e => { e.stopPropagation(); this.copyLinks(links.map(l => l.url)); }),
+            checkedUrls.length ? smallBtn('Copy selected (' + checkedUrls.length + ')', e => { e.stopPropagation(); this.copyLinks(checkedUrls); }, true) : null) : null);
       };
       const resourceCard = (item, color) => h('div', { key: item.title, className: 'card', style: { padding: '1.25rem 1.4rem', background: '#fff' } },
         h('div', { style: { display: 'flex', gap: '.6rem', alignItems: 'flex-start' } },
