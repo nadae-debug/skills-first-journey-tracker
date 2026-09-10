@@ -16,6 +16,8 @@
     <div class="u-hflex-left-center u-gap-4" style="flex:0 0 auto;">
       <img src="<?= getLogoDataUri() ?>" alt="Opportunity@Work" style="height:2rem;width:auto;">
       <span style="width:1.5px;height:1.75rem;background:rgba(28,28,28,.15);display:inline-block;"></span>
+      <img src="<?= getPartnerLogoDataUri() ?>" alt="Ad Council" style="height:2rem;width:auto;border-radius:0.25rem;">
+      <span style="width:1.5px;height:1.75rem;background:rgba(28,28,28,.15);display:inline-block;"></span>
       <span class="u-text-style-main u-weight-semi-bold" style="letter-spacing:-0.02em;">Skills-First Journey Tracker</span>
     </div>
     <span class="u-text-style-small u-color-faded" style="flex:0 0 auto;">TTPC Coalition &amp; Ad Council Board</span>
@@ -25,12 +27,18 @@
 <main>
   <div id="sfj-root" style="font-family: DM Sans; font-weight: 500"></div>
 </main>
-<script>window.SFJ_LOGO_DATA_URI = "<?= getLogoDataUri() ?>";</script>
+<script>
+  window.SFJ_LOGO_DATA_URI = "<?= getLogoDataUri() ?>";
+  window.SFJ_PARTNER_LOGO_DATA_URI = "<?= getPartnerLogoDataUri() ?>";
+</script>
 
 <footer class="u-theme-dark" style="padding-top:3rem;padding-bottom:3rem;margin-top:4rem;">
   <div class="u-container u-hflex-between-center u-text-style-small u-color-faded" style="flex-wrap:wrap;gap:1rem;">
     <div class="u-hflex-left-center u-gap-3">
       <img src="<?= getLogoDataUri() ?>" alt="Opportunity@Work" style="height:1.75rem;width:auto;filter:brightness(0) invert(1);">
+      <span style="display:inline-flex;align-items:center;background:#fff;border-radius:0.3rem;padding:0.15rem;line-height:0;">
+        <img src="<?= getPartnerLogoDataUri() ?>" alt="Ad Council" style="height:1.45rem;width:auto;border-radius:0.15rem;">
+      </span>
       <span>Skills-First Journey Tracker — internal coalition tool</span>
     </div>
     <span>© 2026 Opportunity@Work</span>

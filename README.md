@@ -102,8 +102,11 @@ partner audience does, not auditing the administrators themselves.
   doesn't carry).
 - `Setup.gs` — **run once** after deploying (see Setup below).
 - `Seed.gs` / `Assets.gs` — one-time seed content (Definitions/Resources/
-  Website Engagement starting data, ported from the prototype) and the
-  embedded O@W logo. Not read at runtime except as a fallback.
+  Website Engagement starting data, ported from the prototype; not read at
+  runtime except as a fallback) and the embedded logos: `getLogoDataUri()`
+  (Opportunity@Work) and `getPartnerLogoDataUri()` (Ad Council) — both are
+  read on every page load (`Index.html`'s header/footer, and the entry-gate
+  screen in `JavaScript.html`), not just as a fallback.
 - `Code.gs` — `doGet`, `include()`, and the `api_bootstrap` / `api_refresh`
   / `api_sendEmail` endpoints. `api_bootstrap` returns only branding/
   settings (enough to render the front gate) for a caller with no valid
