@@ -19,16 +19,22 @@ function include(filename) {
 }
 
 /**
- * Single call the client makes on load (and after login) to fetch
- * everything it needs to render: the signed-in user (if the token is still
- * valid), companies (live from the Sheet), engagement, definitions,
- * resources, settings, and — for admins only — the admin list and activity
- * log. Keeping this as one round trip avoids a waterfall of separate
- * google.script.run calls on startup.
+ * Single call the client makes on load (and after entering/login) to fetch
+ * everything it needs to render. Company/engagement/etc. data is withheld
+ * entirely for anonymous callers (no valid session) — access to the site
+ * is restricted to ALLOWED_EMAIL_DOMAINS (Config.gs), enforced by api_enter
+ * (Auth.gs), so an unauthenticated bootstrap only gets enough to render the
+ * entry gate (branding/settings), never the actual data. Once entered,
+ * everyone gets the full company/engagement/etc. payload; only the admin
+ * list and activity log stay admin-only. Keeping this as one round trip
+ * avoids a waterfall of separate google.script.run calls on startup.
  */
 function api_bootstrap(token) {
   var auth = getSession_(token);
-  var isAdmin = !!(auth && auth.role === 'admin');
+  if (!auth) {
+    return { auth: null, settings: getSettings_(), logoDataUri: getLogoDataUri() };
+  }
+  var isAdmin = auth.role === 'admin';
   return {
     auth: auth,
     companies: readCompanies_(),
@@ -38,7 +44,7 @@ function api_bootstrap(token) {
     settings: getSettings_(),
     stages: STAGES,
     categoryKeys: CATEGORY_KEYS,
-    favorites: auth ? getFavorites_(auth.email) : {},
+    favorites: isAdmin ? getFavorites_(auth.email) : {},
     admins: isAdmin ? admins_().map(function (a) { return { name: a.name, email: a.email }; }) : [],
     activity: isAdmin ? api_getActivity(token) : [],
     commentCounts: getCommentCounts_(),
@@ -47,8 +53,11 @@ function api_bootstrap(token) {
 }
 
 /** Re-reads company/engagement data without a full bootstrap (e.g. the nav
- * bar's "Refresh from Sheet" button, or after a save/import/delete). */
+ * bar's "Refresh from Sheet" button, or after a save/import/delete).
+ * Requires a valid session — same access restriction as api_bootstrap, so
+ * this can't be used to read data without passing the entry gate first. */
 function api_refresh(token) {
+  requireAuth_(token);
   return { companies: readCompanies_(), engagement: readEngagement_() };
 }
 

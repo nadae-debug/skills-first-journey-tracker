@@ -12,10 +12,20 @@
  * argument to every google.script.run call.
  */
 
+/**
+ * Never include PasswordHash/Salt here. Apps Script has no true "private"
+ * server function — every top-level function in the project (in any .gs
+ * file) is independently callable from the client via
+ * google.script.run.<name>(...), whether or not the client code ever
+ * references it. A function that returns password hashes must never be one
+ * of those, so admins_() only returns safe fields; api_login reads the
+ * hash/salt itself via a closure nested inside it (see below) that isn't a
+ * top-level declaration and so isn't reachable that way.
+ */
 function admins_() {
   var t = readTable_(sheet_(TAB_ADMINS));
   return t.rows.map(function (r) {
-    return { name: get_(r, 'Name'), email: get_(r, 'Email').toLowerCase(), hash: get_(r, 'PasswordHash'), salt: get_(r, 'Salt'), row: r.__row };
+    return { name: get_(r, 'Name'), email: get_(r, 'Email').toLowerCase(), row: r.__row };
   });
 }
 
@@ -52,14 +62,57 @@ function requireAdmin_(token) {
   return auth;
 }
 
+function emailDomainAllowed_(email) {
+  var m = String(email || '').trim().toLowerCase().match(/@([^@]+)$/);
+  if (!m) return false;
+  var domain = m[1];
+  return ALLOWED_EMAIL_DOMAINS.some(function (d) { return domain === d || domain.slice(-(d.length + 1)) === ('.' + d); });
+}
+
 /**
- * Administrator sign-in only — there is no visitor/general login. Every
- * account must exist in the Admins tab (added via api_addAdmin, by another
- * administrator) with an email + password.
+ * The site's front gate — no password, just name + email, but the email
+ * MUST be at one of ALLOWED_EMAIL_DOMAINS (Config.gs) or entry is refused.
+ * This is what actually restricts who can see the site at all; everything
+ * else (browsing, comments) is open to anyone who gets past this. Separate
+ * from api_login (administrator email + password), which elevates an
+ * already-entered session further — reachable from the nav's "Admin login"
+ * button once inside.
+ */
+function api_enter(name, email) {
+  name = String(name || '').trim();
+  email = String(email || '').trim().toLowerCase();
+  if (!name || !email) return { ok: false, error: 'Enter your name and email.' };
+  if (!emailDomainAllowed_(email)) {
+    return { ok: false, error: 'Access is restricted to Opportunity@Work (@opportunityatwork.org) and Ad Council (@adcouncil.org) email addresses.' };
+  }
+  var auth = { name: name, email: email, role: 'member' };
+  var token = putSession_(auth);
+  logActivity_(auth, 'Signed in', '');
+  return { ok: true, token: token, auth: auth };
+}
+
+/**
+ * Administrator sign-in — elevates an entered session (or starts a fresh
+ * one) to role 'admin'. Every admin account must exist in the Admins tab
+ * (added via api_addAdmin, by another administrator) with an email +
+ * password; there's no self-serve admin signup.
  */
 function api_login(email, password) {
   email = String(email || '').trim().toLowerCase();
-  var adm = findAdminByEmail_(email);
+  // Nested on purpose (see admins_()'s comment) — this is the only place
+  // PasswordHash/Salt are ever read, and being a closure rather than a
+  // top-level function means it can't be invoked independently.
+  function findCredentials(targetEmail) {
+    var t = readTable_(sheet_(TAB_ADMINS));
+    for (var i = 0; i < t.rows.length; i++) {
+      var r = t.rows[i];
+      if (get_(r, 'Email').toLowerCase() === targetEmail) {
+        return { name: get_(r, 'Name'), email: targetEmail, hash: get_(r, 'PasswordHash'), salt: get_(r, 'Salt') };
+      }
+    }
+    return null;
+  }
+  var adm = findCredentials(email);
   if (!adm || !adm.hash || hashPassword_(password || '', adm.salt) !== adm.hash) {
     return { ok: false, error: 'Incorrect administrator email or password.' };
   }
@@ -93,6 +146,7 @@ function api_addAdmin(token, name, email, password) {
   email = String(email || '').trim().toLowerCase();
   password = String(password || '');
   if (!name || !email || !password) throw new Error('Fill in name, email, and password.');
+  if (!emailDomainAllowed_(email)) throw new Error('Administrator accounts must use an @opportunityatwork.org or @adcouncil.org email address.');
   if (findAdminByEmail_(email)) throw new Error('That email is already an administrator.');
   var salt = randomSalt_();
   var hash = hashPassword_(password, salt);

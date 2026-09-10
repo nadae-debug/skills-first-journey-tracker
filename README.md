@@ -18,54 +18,76 @@ Apps Script as the thin server that reads/writes it and enforces roles.
 |---|---|
 | `companies.js` / `engagement.js` static files | Read live from the "Master Spreadsheet" / "Website Engagement" tabs on every load |
 | Client-side password hash-and-compare | Server-side session tokens (`Auth.gs`), password hashed+salted, checked only on the server |
-| Visitor (name+email, no password) + Administrator (email+password) roles | **Open browsing, admin-gated editing.** There's no login gate at all for browsing — anyone with the URL sees the full journey/priority/resources/engagement/definitions content immediately. An "Admin login" button in the nav bar opens a small email+password form; only accounts in the Admins tab can sign in there, and only a signed-in administrator can edit records, see the activity log, manage admins, or view/post company comments. |
-| Per-browser activity log | Shared "Activity Log" tab, read/cleared by any signed-in administrator, written on every sign-in and action |
+| Visitor (name+email, no password) + Administrator (email+password) roles | **Domain-gated entry, admin-gated editing.** The site itself is behind a front gate: enter your name + email, and the email must be at `@opportunityatwork.org` or `@adcouncil.org` (`ALLOWED_EMAIL_DOMAINS` in `Config.gs`) or entry is refused — enforced server-side (`api_enter` in `Auth.gs`), not just hidden in the UI. Once in, everyone can browse everything **and read/post company comments**. A separate "Admin login" button in the nav elevates to administrator (email+password, accounts in the Admins tab only) for editing records, the activity log, and admin management. |
+| Per-browser activity log | Shared "Activity Log" tab, read/cleared by any signed-in administrator, written on every non-admin sign-in and action |
 | Per-browser favorites | Shared "Favorites" tab, keyed by signed-in email |
 | `mailto:` / external POST endpoint for email | Real send via Apps Script `MailApp`, no config needed |
 | N/A | New: a live "Comments" thread per company (shared, not local) |
 
 ## Access model
 
-No login is required to open and browse the app — every viewer sees the
-Skills-First Journey directory, Priority Prospects, Ad Council Resources,
-Website Engagement, and Definitions pages immediately, with full
-search/filter/sort, CSV export, and per-company download.
+The site has a **front gate**: on first load, everyone sees a name + email
+form (no password). The email must be at one of `ALLOWED_EMAIL_DOMAINS`
+(`Config.gs` — currently `opportunityatwork.org` and `adcouncil.org`,
+subdomains included) or entry is refused with an explanatory message. This
+is enforced server-side by `api_enter` in `Auth.gs` — the check happens on
+the email the server receives, not on anything the client claims — and
+`api_bootstrap`/`api_refresh` (`Code.gs`) both refuse to return any company/
+engagement/etc. data to a caller without a valid session, so there's no way
+to read live data by calling the API directly without first passing the
+gate.
 
-An **"Admin login"** button sits in the nav bar (top right). Clicking it
-opens a small email + password form; only accounts already in the `Admins`
-tab (added via Admin & data → Administrators, by an existing admin) can
-sign in there — there's no self-serve signup. Once signed in, the nav shows
-the administrator's name and a "Sign out" button instead, and these become
-available:
+Once entered (role `'member'`), everyone gets:
+- Full read access to the Skills-First Journey directory, Priority
+  Prospects, Ad Council Resources, Website Engagement, and Definitions
+  pages, with search/filter/sort, CSV export, and per-company download
+- **Company comments** — reading and posting, on any company's detail card
+- "Copy" and "Open draft" (a client-side mailto link) in the share dialog
+
+A separate **"Admin login"** button sits in the nav bar (top right).
+Clicking it opens a small email + password form; only accounts already in
+the `Admins` tab (added via Admin & data → Administrators, by an existing
+admin) can sign in there — there's no self-serve admin signup. Once signed
+in, the nav shows the administrator's name and a "Sign out" button, and
+these become additionally available:
 - Add / edit / delete companies, import CSV
 - The "Activity log" and "Admin & data" nav tabs
-- Company comments (both viewing and posting — hidden entirely for
-  anonymous browsers, since there's no identity to authenticate a read/post)
-- Favorites (also hidden for anonymous browsers, for the same reason)
-- Real "Send email" (via `MailApp`) in the share dialog — anonymous
-  browsers still get "Copy" and "Open draft" (a client-side mailto link),
-  just not the server-side send, to keep the app's email quota from being
-  usable by anyone who happens to open the URL
+- Favorites
+- Real "Send email" (via `MailApp`) in the share dialog, instead of just
+  "Copy"/"Open draft" — keeps the app's email quota from being usable by
+  every entered member
 
 Every admin-only action is enforced server-side (`requireAdmin_(token)` in
 Auth.gs), not just hidden in the UI — a request forged without a valid
-admin session token is rejected regardless of what the client claims.
+admin session token is rejected regardless of what the client claims. The
+activity log records member actions only (browsing, comments, exports,
+etc.) — matching the original design intent of tracking what the org/
+partner audience does, not auditing the administrators themselves.
 
 ## Files
 
 - `appsscript.json` — manifest: runs as the deploying user, accessible to
-  anyone (even signed-out) — the app itself shows all its content to anyone
-  who opens the URL; only editing/admin features are gated behind the "Admin
-  login" button in the nav bar. Needs the `spreadsheets` OAuth scope.
-- `Config.gs` — the workbook ID, tab names, stage/dimension constants. Edit
-  `SHEET_ID` here if this is ever pointed at a different workbook.
+  anyone with the URL (even signed out of Google) — but "anyone with the
+  URL" only ever gets the front-gate form; actual content requires entering
+  an allow-listed email, and editing/admin features additionally require
+  the "Admin login" button in the nav bar. Needs the `spreadsheets` OAuth
+  scope.
+- `Config.gs` — the workbook ID, tab names, stage/dimension constants,
+  `ALLOWED_EMAIL_DOMAINS` (who may enter the site at all). Edit `SHEET_ID`
+  here if this is ever pointed at a different workbook.
 - `Util.gs` — shared helpers (header-indexed sheet reads, hashing, slugs).
-- `Auth.gs` — sessions (CacheService, 6h TTL) + administrator login + admin
-  management. **This is where access control is actually enforced** — every
-  admin-only endpoint calls `requireAdmin_(token)` first, so it's enforced
-  server-side even though the "Admin login" button in the nav is the only
-  UI path in. Reading company/engagement/etc. data needs no token at all —
-  only editing, comments, favorites, and real email-send require one.
+- `Auth.gs` — sessions (CacheService, 6h TTL) + the domain-gated `api_enter`
+  front door + administrator login + admin management. **This is where
+  access control is actually enforced** — `api_enter` checks the email's
+  domain server-side before a session token is ever issued, and every
+  admin-only endpoint calls `requireAdmin_(token)` first, so both gates
+  hold even if a client is scripted to skip the UI entirely.
+  `google.script.run` makes every top-level function in the project
+  independently callable from client JS regardless of what the UI
+  references, so anything that reads a password hash/salt is written as a
+  closure nested inside the function that needs it (not top-level) rather
+  than trusted to stay unreferenced — see the comments on `admins_()` and
+  `api_login`.
 - `SheetData.gs` — reads/writes the "Master Spreadsheet" tab. Column mapping
   mirrors the prototype's old client-side sync 1:1, so it needs no changes
   to the existing workbook.
@@ -83,7 +105,11 @@ admin session token is rejected regardless of what the client claims.
   Website Engagement starting data, ported from the prototype) and the
   embedded O@W logo. Not read at runtime except as a fallback.
 - `Code.gs` — `doGet`, `include()`, and the `api_bootstrap` / `api_refresh`
-  / `api_sendEmail` endpoints.
+  / `api_sendEmail` endpoints. `api_bootstrap` returns only branding/
+  settings (enough to render the front gate) for a caller with no valid
+  session — company/engagement/etc. data is withheld until `api_enter` (or
+  `api_login`) has produced a token; `api_refresh` requires a valid session
+  too, for the same reason.
 - `Index.html` / `Stylesheet.html` / `JavaScript.html` — the client. The O@W
   design-system CSS is inlined in `Stylesheet.html`; `JavaScript.html` is a
   close line-for-line port of the prototype's render code (per the original
@@ -211,15 +237,17 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   A company only shows on the Priority Prospects page at all if its Top 10
   checkbox is set on Master Spreadsheet; this tab just supplies its ideas.
 - **Admins** — administrator accounts (name, email, salted password hash).
-  Everyone else browses without any account at all — see Access model below.
-- **Activity Log** — every administrator sign-in / page view / company view
-  / export / download / comment (anonymous browsing isn't logged — there's
-  no identity to attribute it to). Read/cleared by any signed-in
-  administrator; append-only.
-- **Favorites** — per-admin favorited companies, shared across that person's
-  devices (hidden entirely for anonymous browsers — nothing to key it by).
-- **Comments** — the new live comment thread per company (see below) —
-  administrator-only, both to read and to post.
+  Everyone else enters through the domain-gated front door (see Access
+  model above) with no account at all — just a name + allow-listed email.
+- **Activity Log** — every entered member's sign-in / page view / company
+  view / export / download / comment (administrator actions aren't logged
+  — see Access model above). Read/cleared by any signed-in administrator;
+  append-only.
+- **Favorites** — per-admin favorited companies, shared across that
+  person's devices (favorites stay an admin-only feature, not opened up to
+  every member).
+- **Comments** — the live comment thread per company (see below) — open to
+  every entered member, both to read and to post.
 - **App Overrides** — the two remaining ad-hoc fields the live sheet doesn't
   carry: a manual `website` and a `parentNote` (e.g. YouTube's "Google is
   the TTPC partner" note).
@@ -228,10 +256,11 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
 
 Every company's detail card now has a **Comments** section: a live, shared
 thread stored in the **"Comments"** tab (`CompanyId, Timestamp, WhoName,
-WhoEmail, Role, Comment`) — not `localStorage`, not per-browser. Any signed-
-in administrator can read a company's thread and post to it; cards show
-a comment-count badge (from `api_bootstrap`'s `commentCounts`) without
-fetching every thread up front. There's no push/websocket channel here
+WhoEmail, Role, Comment`) — not `localStorage`, not per-browser. Anyone
+who has entered the site (see Access model — an allow-listed email is
+required to get that far) can read a company's thread and post to it;
+cards show a comment-count badge (from `api_bootstrap`'s `commentCounts`)
+without fetching every thread up front. There's no push/websocket channel here
 (Apps Script doesn't have one) — a viewer sees new comments on next load or
 next time they open that company's card, not instantly on someone else's
 keystroke. If your team wants near-real-time, the affordable options are
@@ -260,6 +289,26 @@ not in-app visibility for signed-in staff.
 
 ## Known gaps / next steps
 
+- **`google.script.run` exposure:** Apps Script has no true "private" server
+  function — every top-level function in every `.gs` file is independently
+  callable from client-side JS via `google.script.run.<name>(...)`, whether
+  or not the client bundle ever references it (an `_` suffix is a naming
+  convention, not real privacy). While hardening the domain gate, this
+  surfaced a real issue: `admins_()` was a top-level function returning
+  `PasswordHash`/`Salt` for every admin account — reachable directly, not
+  just through the UI. It's now fixed: `admins_()` returns only name/email/
+  row, and the one place credentials are actually read (`api_login`) does
+  so via a closure nested inside it, which isn't independently callable.
+  Other internal read helpers (`readCompanies_`, `readEngagement_`,
+  `getCommentCounts_`, `getSettings_`, etc.) are technically exposed the
+  same way and bypass their `api_*` wrapper's auth check if called
+  directly — lower severity (business data, not credentials, and the
+  private repo means an anonymous URL-only visitor has no way to discover
+  these exact function names since the client never references them by
+  name in a way dev tools would surface), but not yet closed. Fully
+  closing it means threading a token through each of those functions
+  directly instead of only through their `api_*` callers — flag it if you
+  want that done.
 - **Email quota:** `MailApp.sendEmail` is capped at 100/day (consumer) or
   1,500/day (Google Workspace). Fine for this tool's volume; if O@W ever
   needs more, swap `api_sendEmail` in `Code.gs` for `GmailApp` (higher quota

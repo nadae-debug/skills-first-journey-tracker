@@ -53,6 +53,11 @@ var DEFAULT_ADMIN_NAME = 'Administrator';
 // Session tokens live in CacheService, capped at 6 hours (the service max).
 var SESSION_TTL_SECONDS = 6 * 60 * 60;
 
+// Only email addresses at these domains may enter the site at all (see
+// Auth.gs's api_enter / emailDomainAllowed_). Subdomains are also accepted
+// (e.g. "someone@teams.adcouncil.org" matches "adcouncil.org").
+var ALLOWED_EMAIL_DOMAINS = ['opportunityatwork.org', 'adcouncil.org'];
+
 function ss_() {
   return SpreadsheetApp.openById(SHEET_ID);
 }

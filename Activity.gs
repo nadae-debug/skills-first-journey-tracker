@@ -1,18 +1,18 @@
 /**
  * Shared, server-side activity log — replaces the prototype's per-browser
- * localStorage log. The prototype's rule ("only visitor actions are logged,
- * never admin") no longer applies now that every account is an
- * administrator (the general/visitor login was removed) — every sign-in and
- * action is logged here so the log still serves its original purpose: a
- * shared audit trail of who did what. Only admins may read or clear it
- * (enforced here, not just hidden in the UI).
+ * localStorage log. Only MEMBER actions are recorded (everyone who enters
+ * through the domain-gated front door, see Auth.gs's api_enter) — an
+ * administrator's own actions aren't logged, same as the original design
+ * intent ("track what information is accessed" by the org's staff/
+ * partners, not audit the admins themselves). Only admins may read or
+ * clear the log (enforced here, not just hidden in the UI).
  */
 
 function logActivity_(auth, action, target) {
-  if (!auth) return;
+  if (!auth || auth.role === 'admin') return;
   var sh = findSheet_(TAB_ACTIVITY);
   if (!sh) return; // tab not set up yet; fail soft rather than breaking the caller's action
-  sh.appendRow([nowIso_(), auth.name || auth.email || '', auth.email || '', auth.role || 'admin', action, target || '']);
+  sh.appendRow([nowIso_(), auth.name || auth.email || '', auth.email || '', auth.role || 'member', action, target || '']);
 }
 
 function api_track(token, action, target) {
