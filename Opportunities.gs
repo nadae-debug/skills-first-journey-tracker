@@ -1,9 +1,17 @@
 /**
  * "Priority Prospect Opportunities" tab — explicit, spreadsheet-editable
- * engagement ideas for each Top 10 priority prospect. One row per
- * opportunity (a company can have several); matched to a company by name
- * (same alias + slugify logic as Master Spreadsheet, so "Citigroup" and
- * "Citi" resolve to the same company here too).
+ * engagement ideas for ANY company, not just ones flagged as a priority
+ * account. One row per opportunity (a company can have several); matched
+ * to a company by name (same alias + slugify logic as Master Spreadsheet,
+ * so "Citigroup" and "Citi" resolve to the same company here too).
+ *
+ * Open to everyone who has entered the site (requireAuth_, not
+ * requireAdmin_) — same as Comments.gs: viewing and adding an opportunity
+ * needs no administrator account, just a signed-in member. The client
+ * gates ADDING one behind an icon click (on the company card preview or
+ * within its full detail card) rather than showing an always-open
+ * composer, but that's a UI choice, not an access-control one — this
+ * endpoint itself doesn't care how the client got the text.
  *
  * Columns: Company | Opportunity | Status | Notes | Added By | Added Date.
  * Only Company + Opportunity are required — Status/Notes/Added By/Added
@@ -44,7 +52,7 @@ function api_getOpportunities(token, companyId) {
 }
 
 function api_addOpportunity(token, companyName, opportunity, status, notes) {
-  var auth = requireAdmin_(token);
+  var auth = requireAuth_(token);
   opportunity = String(opportunity || '').trim();
   if (!companyName || !opportunity) throw new Error('Company and opportunity text are required.');
   var sh = sheet_(TAB_OPPORTUNITIES);

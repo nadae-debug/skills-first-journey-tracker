@@ -156,7 +156,7 @@
         .withFailureHandler(err => this.flash('Could not post comment: ' + ((err && err.message) || err)))
         .api_addComment(this.token, id, text);
     }
-    // ---------- priority prospect opportunities (live, shared — "Priority Prospect Opportunities" sheet tab) ----------
+    // ---------- prospective opportunities (live, shared, every company — "Priority Prospect Opportunities" sheet tab) ----------
     addOpportunity(id, companyName) {
       const text = ((this.state.oppDrafts || {})[id] || '').trim();
       if (!text) return;
@@ -164,6 +164,7 @@
         .withSuccessHandler(res => this.setState(s => ({
           companies: s.companies.map(c => c.id === id ? Object.assign({}, c, { engagementIdeas: res.engagementIdeas }) : c),
           oppDrafts: Object.assign({}, s.oppDrafts, { [id]: '' }),
+          oppOpenFor: s.oppOpenFor === id ? null : s.oppOpenFor,
         })))
         .withFailureHandler(err => this.flash('Could not add opportunity: ' + ((err && err.message) || err)))
         .api_addOpportunity(this.token, companyName, text);
@@ -417,7 +418,7 @@
         ['Company', c => c.company], ['Logo', c => c.logo],
         ['TTPC Partner', c => c.ttpc ? 'Yes' : 'No'], ['Ad Council Board Member', c => c.adCouncil ? 'Yes' : 'No'],
         ["What We've Done Together", c => c.doneTogether],
-        ['Top 10', c => c.top10 ? 'Yes' : 'No'], ['Top 10 Notes', c => c.top10Notes],
+        ['Priority Account', c => c.top10 ? 'Yes' : 'No'], ['Priority Account Notes', c => c.top10Notes],
         ['Points of Contact', c => (c.pointsOfContact || []).map(p => p.name + (p.title ? ' (' + p.title + ')' : '')).join(' | ')],
         ['Engagement Ideas', c => (c.engagementIdeas || []).join(' | ')],
         ['Last Change Direction', c => c.lastChangeDirection], ['Last Reassessed', c => c.lastReassessed], ['Latest Change Summary', c => c.latestChangeSummary],
@@ -528,6 +529,16 @@
       const engBadge = id => { const e = engById[id]; if (!e) return null; return h('span', { title: e.total + ' website visit' + (e.total === 1 ? '' : 's'), style: { display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, color: '#8c4799', background: '#f3e9f5', border: '1.5px solid #d9bfe0', borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, globe, e.total); };
       const commentIcon = h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flex: '0 0 auto' } }, h('path', { d: 'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z' }));
       const commentBadge = id => { const n = st.commentCounts[id]; if (!n) return null; return h('span', { title: n + ' comment' + (n === 1 ? '' : 's'), style: { display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, color: '#0f153b', background: '#eef0f4', border: '1.5px solid #cfd3dd', borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, commentIcon, n); };
+      // Prospective opportunities: visible + addable for every company, by
+      // anyone signed in — the icon toggles a quick add-composer rather
+      // than showing one inline all the time.
+      const oppIcon = h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flex: '0 0 auto' } },
+        h('path', { d: 'M9 18h6' }), h('path', { d: 'M10 22h4' }), h('path', { d: 'M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.3v1h6v-1c0-1.1.4-1.8 1-2.3A7 7 0 0 0 12 2z' }));
+      const toggleOppComposer = (e, id) => { e.stopPropagation(); this.setState(s => ({ oppOpenFor: s.oppOpenFor === id ? null : id })); };
+      const oppBadge = c => { const n = (c.engagementIdeas || []).length; return h('button', { onClick: e => toggleOppComposer(e, c.id), title: (n ? n + ' opportunit' + (n === 1 ? 'y' : 'ies') + ' on file — ' : '') + 'Click to add an opportunity', style: { cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid ' + (n ? '#f3b8b4' : '#cfd3dd'), background: n ? '#fdefee' : '#eef0f4', color: n ? '#e03c32' : '#6b6f80', display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, oppIcon, n || null); };
+      const oppComposer = c => st.oppOpenFor !== c.id ? null : h('div', { onClick: e => e.stopPropagation(), style: { display: 'flex', gap: '.4rem' } },
+        h('input', { value: (st.oppDrafts || {})[c.id] || '', onChange: e => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [c.id]: e.target.value }) })), onKeyDown: e => { if (e.key === 'Enter') this.addOpportunity(c.id, c.company); }, placeholder: 'Add an opportunity…', autoFocus: true, style: { flex: 1, minWidth: 0, padding: '.4rem .65rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.8rem', boxSizing: 'border-box' } }),
+        h('button', { onClick: () => this.addOpportunity(c.id, c.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .8rem', borderRadius: '.5rem', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', whiteSpace: 'nowrap' } }, 'Add'));
       const favCount = Object.keys(st.favorites || {}).length;
       const star = (filled, sz) => h('svg', { width: sz || 18, height: sz || 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.4, strokeLinecap: 'round', style: { flex: '0 0 auto' } }, h('path', { d: 'M12 3.4V20.6 M4.55 7.7L19.45 16.3 M4.55 16.3L19.45 7.7' }));
       // Favorites need a signed-in identity to persist against — hidden for anonymous browsers.
@@ -656,7 +667,8 @@
         h('div', null, badge(c.overall)),
         (c.board && c.board.length) ? h('div', { style: { fontSize: '.8rem', color: '#b5651d', display: 'flex', flexDirection: 'column', gap: '.15rem' } }, c.board.map((m, i) => h('span', { key: i }, '● ' + m.name + (m.title ? ' — ' + m.title : '')))) : null,
         h('p', { className: 'u-text-style-small u-color-faded', style: { margin: 0, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, c.overallWhy || 'No status recorded yet.'),
-        h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginTop: 'auto', alignItems: 'center' } }, c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('Ad Council', '#e87722') : null, engBadge(c.id), commentBadge(c.id))); };
+        h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginTop: 'auto', alignItems: 'center' } }, c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('Ad Council', '#e87722') : null, engBadge(c.id), commentBadge(c.id), oppBadge(c)),
+        oppComposer(c)); };
       const cardsView = h('div', { className: 'u-grid-column-3' }, list.map(card));
 
       // ---- TABLE ----
@@ -672,7 +684,7 @@
             th('Company', 'company'), th('Membership'), th('Overall', 'overall'), th('Assessed', 'assessmentDate'))),
           h('tbody', null, list.map(c => h('tr', { key: c.id, className: 'sfj-row', onClick: () => this.openCompany(c.id), style: { cursor: 'pointer', background: st.selected[c.id] ? '#faf5fb' : undefined } },
             td(h('div', { onClick: e => e.stopPropagation() }, check(c.id))),
-            td(h('div', { style: { display: 'flex', alignItems: 'center', gap: '.6rem' } }, h('span', { onClick: e => e.stopPropagation(), style: { lineHeight: 0 } }, favBtn(c.id)), avatar(c, 32), h('span', { style: { fontWeight: 500 } }, c.company), engBadge(c.id), commentBadge(c.id))),
+            td(h('div', { style: { display: 'flex', alignItems: 'center', gap: '.6rem' } }, h('span', { onClick: e => e.stopPropagation(), style: { lineHeight: 0 } }, favBtn(c.id)), avatar(c, 32), h('span', { style: { fontWeight: 500 } }, c.company), engBadge(c.id), commentBadge(c.id), h('button', { onClick: e => { e.stopPropagation(); this.openCompany(c.id); }, title: 'View / add opportunities', style: { cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid ' + ((c.engagementIdeas || []).length ? '#f3b8b4' : '#cfd3dd'), background: (c.engagementIdeas || []).length ? '#fdefee' : '#eef0f4', color: (c.engagementIdeas || []).length ? '#e03c32' : '#6b6f80', display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, oppIcon, (c.engagementIdeas || []).length || null))),
             td(h('div', { style: { display: 'flex', gap: '.3rem' } }, c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('AC', '#e87722') : null)),
             td(badge(c.overall, true)),
             td(c.assessmentDate || '—'))))));
@@ -724,6 +736,23 @@
 
       // Comments — live, shared thread stored in the "Comments" sheet tab (see Comments.gs).
       // Open to everyone who's entered the site — not admin-gated.
+      // Prospective opportunities — visible to everyone for every company;
+      // adding one is gated behind the "Add" icon rather than an
+      // always-open composer (see oppBadge on the card preview for the
+      // same pattern).
+      const oppSectionOpen = !!sel && st.oppOpenFor === sel.id;
+      const opportunitiesSection = !sel ? null : h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.75rem', marginBottom: '.6rem' } },
+          h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80' } },
+            'Prospective opportunities' + ((sel.engagementIdeas || []).length ? ' (' + sel.engagementIdeas.length + ')' : '')),
+          h('button', { onClick: () => this.setState(s => ({ oppOpenFor: s.oppOpenFor === sel.id ? null : sel.id })), title: 'Add an opportunity', style: { cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid #e03c32', background: oppSectionOpen ? '#e03c32' : '#fff', color: oppSectionOpen ? '#fff' : '#e03c32', display: 'inline-flex', alignItems: 'center', gap: '.3rem', fontSize: '.78rem', fontWeight: 500, borderRadius: '100vw', padding: '.3rem .75rem', flex: '0 0 auto' } }, oppIcon, 'Add')),
+        (sel.engagementIdeas && sel.engagementIdeas.length) ? h('ul', { style: { margin: '0 0 ' + (oppSectionOpen ? '.85rem' : 0), paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '.4rem' } },
+          sel.engagementIdeas.map((idea, i) => h('li', { key: i, style: { fontSize: '.85rem', color: '#0f153b' } }, idea)))
+          : h('div', { style: { fontSize: '.8rem', color: '#9aa0b4', marginBottom: oppSectionOpen ? '.85rem' : 0 } }, 'No opportunities on file yet — be the first to add one.'),
+        oppSectionOpen ? h('div', { style: { display: 'flex', gap: '.5rem' } },
+          h('input', { value: (st.oppDrafts || {})[sel.id] || '', onChange: e => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [sel.id]: e.target.value }) })), onKeyDown: e => { if (e.key === 'Enter') this.addOpportunity(sel.id, sel.company); }, placeholder: 'Add an opportunity…', autoFocus: true, style: { flex: 1, padding: '.55rem .8rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.85rem', boxSizing: 'border-box' } }),
+          h('button', { onClick: () => this.addOpportunity(sel.id, sel.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid #e03c32', background: '#e03c32', color: '#fff', whiteSpace: 'nowrap' } }, 'Post')) : null);
+
       const commentsSection = !sel ? null : h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
         h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.6rem' } },
           'Comments' + ((st.comments[sel.id] || []).length ? ' (' + st.comments[sel.id].length + ')' : '')),
@@ -753,7 +782,7 @@
             (sel.previousAssessments && sel.previousAssessments.length) ? h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '1.25rem', padding: '.3rem', background: '#f0f0ee', borderRadius: '100vw', width: 'fit-content' } },
               h('button', { onClick: () => this.setState({ assessmentTab: 'current' }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'current' ? '#8c4799' : 'transparent', color: assessmentTab === 'current' ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, 'Current — ' + (sel.lastReassessed || sel.assessmentDate || 'undated')),
               sel.previousAssessments.map((p, i) => h('button', { key: i, onClick: () => this.setState({ assessmentTab: 'prev' + i }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'prev' + i ? '#8c4799' : 'transparent', color: assessmentTab === 'prev' + i ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, p.date || 'Undated'))) : null,
-            h('div', { style: { display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' } }, badge(activeAssess.overall), !activeAssess.isCurrent ? tag('Past assessment', '#9aa0b4') : null, sel.ttpc ? tag('TTPC partner', '#8c4799') : null, sel.adCouncil ? tag('Ad Council board', '#e87722') : null, sel.top10 ? tag('Top 10 priority', '#e03c32') : null, sel.industry ? h('span', { className: 'u-text-style-small u-color-faded' }, sel.industry) : null),
+            h('div', { style: { display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' } }, badge(activeAssess.overall), !activeAssess.isCurrent ? tag('Past assessment', '#9aa0b4') : null, sel.ttpc ? tag('TTPC partner', '#8c4799') : null, sel.adCouncil ? tag('Ad Council board', '#e87722') : null, sel.top10 ? tag('Priority account', '#e03c32') : null, sel.industry ? h('span', { className: 'u-text-style-small u-color-faded' }, sel.industry) : null),
             (activeAssess.isCurrent && changesSinceLast) ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid ' + (changesSinceLast.items.length || changesSinceLast.scoreLine ? '#c7e3f0' : 'rgba(28,28,28,.1)'), background: (changesSinceLast.items.length || changesSinceLast.scoreLine) ? '#eef7fb' : '#f9f9f7', borderRadius: '.8rem', padding: '.85rem 1rem' } },
               h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#2b7ea1', marginBottom: '.5rem' } }, 'Changes since ' + (changesSinceLast.since || 'last assessment')),
               (changesSinceLast.items.length || changesSinceLast.scoreLine) ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem' } },
@@ -764,7 +793,7 @@
               h('span', { style: { fontSize: '1rem', lineHeight: 1.2, flex: '0 0 auto' } }, 'ⓘ'),
               h('div', null, h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#8c4799', marginBottom: '.25rem' } }, 'Coalition status'), h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.parentNote))) : null,
             sel.top10Notes ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid #f3b8b4', background: '#fdefee', borderRadius: '.8rem', padding: '.85rem 1rem' } },
-              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.25rem' } }, 'Top 10 priority notes'), h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.top10Notes)) : null,
+              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.25rem' } }, 'Priority account notes'), h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.top10Notes)) : null,
             (sel.board && sel.board.length) ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid #f0dcc4', background: '#fdf7ef', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
               h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#b5651d', marginBottom: '.6rem' } }, 'Ad Council board — ' + sel.board.length + (sel.board.length === 1 ? ' member' : ' members')),
               h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.5rem' } }, sel.board.map((m, i) => h('div', { key: i, style: { display: 'flex', gap: '.75rem', alignItems: 'center', justifyContent: 'space-between', background: '#fff', border: '1px solid rgba(28,28,28,.08)', borderRadius: '.6rem', padding: '.6rem .8rem' } },
@@ -797,6 +826,7 @@
             (activeAssess.sources && activeAssess.sources.length) ? h('div', { style: { marginBottom: '1.1rem' } },
               h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.4rem' } }, 'Sources (' + activeAssess.sources.length + ')'),
               h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem' } }, activeAssess.sources.map((s, i) => h('a', { key: i, href: s, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.82rem', wordBreak: 'break-all' } }, (i + 1) + '. ' + s)))) : null,
+            opportunitiesSection,
             commentsSection,
             h('div', { style: { display: 'flex', gap: '.6rem', marginTop: '1.5rem', borderTop: '1.5px solid rgba(28,28,28,.1)', paddingTop: '1.25rem', flexWrap: 'wrap' } },
               engById[sel.id] ? actionBtn('View website engagement →', () => { const e = engById[sel.id]; this.setState({ page: 'engagement', engQ: e.company, engExpanded: { [e.company]: true }, selectedId: null }); window.scrollTo({ top: 0 }); }) : null,
@@ -824,8 +854,8 @@
             textField('Overall classification reasoning', 'overallWhy', true),
             textField("What we've done together", 'doneTogether', true),
             h('div', { style: { display: 'flex', gap: '1.5rem', flexWrap: 'wrap' } },
-              h('label', { style: { display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.88rem', cursor: 'pointer' } }, h('input', { type: 'checkbox', checked: !!e.top10, onChange: ev => this.setEdit({ top10: ev.target.checked }) }), 'Top 10 priority prospect')),
-            textField('Top 10 notes', 'top10Notes', true),
+              h('label', { style: { display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.88rem', cursor: 'pointer' } }, h('input', { type: 'checkbox', checked: !!e.top10, onChange: ev => this.setEdit({ top10: ev.target.checked }) }), 'Priority account')),
+            textField('Priority account notes', 'top10Notes', true),
             h('div', null, lbl('Engagement ideas (one per line)'), h('textarea', { value: (e.engagementIdeas || []).join('\n'), rows: 3, onChange: ev => this.setEdit({ engagementIdeas: ev.target.value.split('\n').map(s => s.trim()).filter(Boolean) }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })),
             h('div', null, lbl('Points of contact (one per line: Name — Title)'), h('textarea', { value: (e.pointsOfContact || []).map(p => p.name + (p.title ? ' — ' + p.title : '')).join('\n'), rows: 2, onChange: ev => this.setEdit({ pointsOfContact: ev.target.value.split('\n').map(s => s.trim()).filter(Boolean).map(s => { const parts = s.split(' — '); return { name: parts[0], title: parts[1] || '' }; }) }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })),
             h('div', { style: { fontSize: '.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginTop: '.5rem' } }, 'Dimension classifications'),
@@ -928,6 +958,10 @@
       // ---- ENGAGEMENT PAGE ----
       const engList = this.engFiltered();
       const sum = k => this.ENG.reduce((s, e) => s + (e[k] || 0), 0);
+      // "Companies with recorded visits" means what it says — a row that
+      // exists in the sheet but has 0 total visits isn't one, so this
+      // shouldn't just be this.ENG.length.
+      const recordedCount = this.ENG.filter(e => e.total > 0).length;
       const engKpi = (v, label, color) => h('div', { className: 'card', style: { padding: '1.5rem', background: '#fff' } },
         h('div', { className: 'u-text-style-h3 u-weight-medium', style: { color: color || '#0f153b', lineHeight: 1 } }, v.toLocaleString()),
         h('div', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.4rem' } }, label));
@@ -1000,7 +1034,7 @@
           h('h1', { className: 'u-text-style-h2', style: { margin: 0, maxWidth: '22ch' } }, 'How our companies engage with the campaign online'),
           h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '56ch' } }, 'Recorded visits to Opportunity@Work and Tear the Paper Ceiling web properties, by company. Click a company to see its visit history.'),
           h('div', { className: 'u-grid-column-4', style: { marginTop: '2rem' } },
-            engKpi(this.ENG.length, 'Companies with recorded visits'),
+            engKpi(recordedCount, 'Companies with recorded visits'),
             engKpi(sum('total'), 'Total visits'),
             engKpi(sum('ttpc'), 'Tear the Paper Ceiling visits', '#e87722'),
             engKpi(sum('oaw'), 'Opportunity@Work visits', '#8c4799')),
@@ -1040,21 +1074,19 @@
       const prospectCard = c => h('div', { key: c.id, className: 'card sfj-card', onClick: () => this.openCompany(c.id), style: { padding: '1.5rem', background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '.75rem', borderTop: '4px solid #e03c32' } },
         h('div', { style: { display: 'flex', gap: '.9rem', alignItems: 'flex-start' } }, avatar(c, 48),
           h('div', { style: { minWidth: 0, flex: 1 } }, h('div', { className: 'u-weight-medium', style: { fontSize: '1.0625rem', letterSpacing: '-0.02em' } }, c.company), c.industry ? h('div', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.15rem' } }, c.industry) : null)),
-        h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap' } }, badge(c.overall), c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('Ad Council', '#e87722') : null),
+        h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap', alignItems: 'center' } }, badge(c.overall), c.ttpc ? tag('TTPC', '#8c4799') : null, c.adCouncil ? tag('Ad Council', '#e87722') : null, oppBadge(c)),
         c.top10Notes ? h('p', { className: 'u-text-style-small', style: { margin: 0, color: '#0f153b' } }, c.top10Notes) : null,
         (c.engagementIdeas && c.engagementIdeas.length) ? h('div', { style: { background: '#fdefee', border: '1px solid #f3b8b4', borderRadius: '.6rem', padding: '.7rem .85rem' } },
           h('div', { style: { fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.35rem' } }, 'Engagement ideas'),
           h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '.82rem', lineHeight: 1.5, color: '#0f153b' } }, c.engagementIdeas.map((idea, i) => h('li', { key: i }, idea)))) : null,
-        isAdmin ? h('div', { onClick: e => e.stopPropagation(), style: { display: 'flex', gap: '.4rem' } },
-          h('input', { value: (st.oppDrafts || {})[c.id] || '', onChange: e => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [c.id]: e.target.value }) })), onKeyDown: e => { if (e.key === 'Enter') this.addOpportunity(c.id, c.company); }, placeholder: 'Add an opportunity…', style: { flex: 1, padding: '.45rem .7rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.8rem', boxSizing: 'border-box' } }),
-          h('button', { onClick: () => this.addOpportunity(c.id, c.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.45rem .9rem', borderRadius: '.5rem', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', whiteSpace: 'nowrap' } }, 'Add')) : null);
+        oppComposer(c));
       const priorityPage = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '3rem' } },
         h('div', { className: 'u-container' },
           h('div', { className: 'g-eyebrow', style: { marginBottom: '.75rem' } }, 'Priority prospects'),
           h('h1', { className: 'u-text-style-h2', style: { margin: 0, maxWidth: '24ch' } }, 'Where Ad Council and Opportunity@Work are focusing next'),
           h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '58ch' } }, 'Companies flagged as top priorities for coalition growth, with the rationale and any engagement ideas on file.'),
           h('div', { className: 'u-grid-column-3', style: { marginTop: '2rem' } }, priorityCompanies.length ? priorityCompanies.map(prospectCard) : null),
-          !priorityCompanies.length ? h('div', { className: 'card', style: { padding: '3rem', textAlign: 'center', background: '#fff', marginTop: '1.5rem' } }, h('p', { className: 'u-text-style-large', style: { margin: 0 } }, 'No companies are flagged as priority prospects yet.'), isAdmin ? h('p', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.5rem' } }, 'Mark a company "Top 10 priority" from its edit form to add it here.') : null) : null));
+          !priorityCompanies.length ? h('div', { className: 'card', style: { padding: '3rem', textAlign: 'center', background: '#fff', marginTop: '1.5rem' } }, h('p', { className: 'u-text-style-large', style: { margin: 0 } }, 'No companies are flagged as priority prospects yet.'), isAdmin ? h('p', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.5rem' } }, 'Mark a company "Priority account" from its edit form to add it here.') : null) : null));
 
       // ---- AD COUNCIL RESOURCES PAGE ----
       const RES = this.RES;

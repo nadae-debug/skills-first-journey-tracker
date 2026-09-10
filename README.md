@@ -42,6 +42,9 @@ Once entered (role `'member'`), everyone gets:
   Prospects, Ad Council Resources, Website Engagement, and Definitions
   pages, with search/filter/sort, CSV export, and per-company download
 - **Company comments** — reading and posting, on any company's detail card
+- **Prospective opportunities** — viewing and adding, for any company (not
+  just ones flagged as a priority account), via a small icon on its card
+  or a button in its detail card
 - "Copy" and "Open draft" (a client-side mailto link) in the share dialog
 
 A separate **"Admin login"** button sits in the nav bar (top right).
@@ -144,6 +147,23 @@ thing `CacheService` is used for is admin session tokens (`Auth.gs`), never
 company data, so there's no stale-data path to worry about: the app always
 reflects whatever is in the Sheet right now.
 
+**Website Engagement accuracy:** the four numbers at the top of the
+Website Engagement page — companies with recorded visits, total visits,
+Tear the Paper Ceiling visits, and Opportunity@Work visits — are always
+derived from whatever rows currently exist in the Website Engagement tab
+(`Engagement.gs`'s `readEngagement_()`), so adding, editing, or removing a
+row there is immediately reflected, no redeploy needed. Two things keep
+them internally consistent rather than just "whatever's typed in": a row's
+`total` is computed as `O&W Visits + TTPC Visits` whenever either is
+present (falling back to a bare `Total Visits` cell only for a row with no
+breakdown at all), so "Total visits" always reconciles with the TTPC/O@W
+breakdown next to it even if someone edits one column and not the other;
+and "Companies with recorded visits" counts only rows with total > 0,
+not every row that merely exists in the tab. If the tab still has the
+original placeholder companies (Wells Fargo, AT&T, Apple, etc.) that
+`oneTimeSetup` seeds it with, delete those rows once your real data is in
+— they'll otherwise be counted alongside it.
+
 **Historical reference:** a company can have MORE THAN ONE row in Master
 Spreadsheet — one per assessment — differentiated by the `Is Current
 Assessment` column (see Data model below). The app groups rows by company,
@@ -202,8 +222,12 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
 
 - **Master Spreadsheet** (existing, owned by the assessment team) — company
   name, classifications/reasoning per dimension, board members, points of
-  contact, sources, Top 10 flag/notes, etc. Read fresh on every page load;
-  written back on every admin save/delete/import. **A company can have more
+  contact, sources, priority-account flag/notes, etc. Read fresh on every
+  page load; written back on every admin save/delete/import. The sheet
+  column is still named `Top 10` (renaming it would break existing data —
+  only the app's on-screen label changed, to "Priority account," since the
+  list has grown past ten companies); `top10`/`top10Notes` stay the field
+  names in code too, for the same reason. **A company can have more
   than one row** — one per assessment, for a company that's been
   re-assessed — differentiated by an **`Is Current Assessment`** column
   (`Yes`/`No`, same convention as `TTPC Member`/`Top 10`). Add this column
@@ -235,17 +259,24 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   "Before joining TTPC", or "Board-only" / "Exclusive"; a misspelled Section
   value just means that row silently doesn't show, so double-check it
   against those three if a row you added doesn't appear.
-- **Priority Prospect Opportunities** — explicit engagement ideas for Top 10
-  priority prospects, one row per idea. Columns: `Company | Opportunity |
-  Status | Notes | Added By | Added Date`. Only `Company` and `Opportunity`
-  are required (e.g. `Allstate | Invite to the Q3 TTPC employer roundtable`)
-  — `Status`/`Notes`/`Added By`/`Added Date` are there for the team to track
-  follow-through but aren't required for an idea to show up on the Priority
-  Prospects page. `Company` is matched the same way as Master Spreadsheet
-  (through the alias table in `SheetData.gs`, so "Citi" and "Citigroup"
-  resolve to the same company) — use the same company name you'd use there.
-  A company only shows on the Priority Prospects page at all if its Top 10
-  checkbox is set on Master Spreadsheet; this tab just supplies its ideas.
+- **Priority Prospect Opportunities** — explicit engagement ideas for **any**
+  company (not only ones flagged as a priority account), one row per idea.
+  Columns: `Company | Opportunity | Status | Notes | Added By | Added Date`.
+  Only `Company` and `Opportunity` are required (e.g. `Allstate | Invite to
+  the Q3 TTPC employer roundtable`) — `Status`/`Notes`/`Added By`/`Added
+  Date` are there for the team to track follow-through but aren't required
+  for an idea to show up. `Company` is matched the same way as Master
+  Spreadsheet (through the alias table in `SheetData.gs`, so "Citi" and
+  "Citigroup" resolve to the same company) — use the same company name
+  you'd use there. Viewing and adding an opportunity needs no
+  administrator account — any signed-in member can, on the small icon
+  badge on a company's card (in the directory grid or the Priority
+  Prospects page) or the "Add" button in its full detail card's
+  "Prospective opportunities" section, both of which reveal a one-line
+  composer rather than showing one open all the time. A company being
+  flagged as a priority account only controls whether it appears on the
+  **Priority Prospects page**; its opportunities are visible everywhere
+  regardless.
 - **Admins** — administrator accounts (name, email, salted password hash).
   Everyone else enters through the domain-gated front door (see Access
   model above) with no account at all — just a name + allow-listed email.
