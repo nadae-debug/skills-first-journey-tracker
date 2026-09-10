@@ -74,6 +74,7 @@
       super(props);
       this.token = '';
       try { this.token = localStorage.getItem('sfj_token') || ''; } catch (e) {}
+      this.oppRefs = {}; // {companyId: <textarea> DOM node} — for the opportunity composer's formatting toolbar
       this.state = {
         loading: true, bootError: '',
         companies: [], engagement: [], definitions: [], resources: null,
@@ -168,6 +169,35 @@
         })))
         .withFailureHandler(err => this.flash('Could not add opportunity: ' + ((err && err.message) || err)))
         .api_addOpportunity(this.token, companyName, text);
+    }
+    // Lightweight markdown (**bold**, _italic_, "- " bullets) applied to the
+    // opportunity composer's textarea selection — stored as plain text in
+    // the sheet, parsed back into React nodes by renderRich() wherever an
+    // opportunity is displayed (never as raw HTML, so nothing a member
+    // types can inject markup).
+    oppFormat(id, kind) {
+      const ta = this.oppRefs[id];
+      const cur = (this.state.oppDrafts || {})[id] || '';
+      const setDraft = (next, selStart, selEnd) => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [id]: next }) }), () => {
+        if (ta) { ta.focus(); ta.setSelectionRange(selStart, selEnd); }
+      });
+      if (kind === 'bold' || kind === 'italic') {
+        const mark = kind === 'bold' ? '**' : '_';
+        const start = ta ? ta.selectionStart : cur.length, end = ta ? ta.selectionEnd : cur.length;
+        const selected = cur.slice(start, end) || (kind === 'bold' ? 'bold text' : 'italic text');
+        const next = cur.slice(0, start) + mark + selected + mark + cur.slice(end);
+        setDraft(next, start + mark.length, start + mark.length + selected.length);
+        return;
+      }
+      // bullet: toggle "- " at the start of every line the selection touches
+      const start = ta ? ta.selectionStart : cur.length, end = ta ? ta.selectionEnd : cur.length;
+      const lineStart = cur.lastIndexOf('\n', start - 1) + 1;
+      let lineEnd = cur.indexOf('\n', end); if (lineEnd === -1) lineEnd = cur.length;
+      const lines = cur.slice(lineStart, lineEnd).split('\n');
+      const allBulleted = lines.every(l => !l.trim() || /^\s*[-*]\s/.test(l));
+      const toggled = lines.map(l => !l.trim() ? l : allBulleted ? l.replace(/^\s*[-*]\s?/, '') : '- ' + l.replace(/^\s+/, '')).join('\n');
+      const next = cur.slice(0, lineStart) + toggled + cur.slice(lineEnd);
+      setDraft(next, lineStart, lineStart + toggled.length);
     }
     downloadCompany(id) {
       const c = this.state.companies.find(x => x.id === id); if (!c) return;
@@ -536,9 +566,39 @@
         h('path', { d: 'M9 18h6' }), h('path', { d: 'M10 22h4' }), h('path', { d: 'M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.3v1h6v-1c0-1.1.4-1.8 1-2.3A7 7 0 0 0 12 2z' }));
       const toggleOppComposer = (e, id) => { e.stopPropagation(); this.setState(s => ({ oppOpenFor: s.oppOpenFor === id ? null : id })); };
       const oppBadge = c => { const n = (c.engagementIdeas || []).length; return h('button', { onClick: e => toggleOppComposer(e, c.id), title: (n ? n + ' opportunit' + (n === 1 ? 'y' : 'ies') + ' on file — ' : '') + 'Click to add an opportunity', style: { cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid ' + (n ? '#f3b8b4' : '#cfd3dd'), background: n ? '#fdefee' : '#eef0f4', color: n ? '#e03c32' : '#6b6f80', display: 'inline-flex', alignItems: 'center', gap: '.28rem', fontSize: '.72rem', fontWeight: 600, borderRadius: '100vw', padding: '.15rem .5rem', flex: '0 0 auto' } }, oppIcon, n || null); };
-      const oppComposer = c => st.oppOpenFor !== c.id ? null : h('div', { onClick: e => e.stopPropagation(), style: { display: 'flex', gap: '.4rem' } },
-        h('input', { value: (st.oppDrafts || {})[c.id] || '', onChange: e => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [c.id]: e.target.value }) })), onKeyDown: e => { if (e.key === 'Enter') this.addOpportunity(c.id, c.company); }, placeholder: 'Add an opportunity…', autoFocus: true, style: { flex: 1, minWidth: 0, padding: '.4rem .65rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.8rem', boxSizing: 'border-box' } }),
-        h('button', { onClick: () => this.addOpportunity(c.id, c.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .8rem', borderRadius: '.5rem', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', whiteSpace: 'nowrap' } }, 'Add'));
+      const oppToolbarBtn = (id, kind, label, title) => h('button', { key: kind, type: 'button', onClick: e => { e.stopPropagation(); this.oppFormat(id, kind); }, title: title, style: { cursor: 'pointer', fontFamily: 'inherit', border: '1px solid rgba(28,28,28,.18)', background: '#fff', color: '#4a4e60', borderRadius: '.4rem', padding: '.15rem .55rem', fontSize: '.75rem', lineHeight: 1.4 } }, label);
+      const oppComposer = c => st.oppOpenFor !== c.id ? null : h('div', { onClick: e => e.stopPropagation(), style: { display: 'flex', flexDirection: 'column', gap: '.35rem' } },
+        h('div', { style: { display: 'flex', gap: '.3rem' } },
+          oppToolbarBtn(c.id, 'bold', h('b', null, 'B'), 'Bold'),
+          oppToolbarBtn(c.id, 'italic', h('i', null, 'I'), 'Italic'),
+          oppToolbarBtn(c.id, 'bullet', '• List', 'Bullet list')),
+        h('div', { style: { display: 'flex', gap: '.4rem' } },
+          h('textarea', { ref: el => { this.oppRefs[c.id] = el; }, value: (st.oppDrafts || {})[c.id] || '', rows: 3, onChange: e => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [c.id]: e.target.value }) })), onKeyDown: e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') this.addOpportunity(c.id, c.company); }, placeholder: 'Add an opportunity… (⌘/Ctrl+Enter to add)', autoFocus: true, style: { flex: 1, minWidth: 0, padding: '.4rem .65rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.8rem', lineHeight: 1.4, resize: 'vertical', boxSizing: 'border-box' } }),
+          h('button', { onClick: () => this.addOpportunity(c.id, c.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .8rem', borderRadius: '.5rem', border: '1.5px solid #e03c32', background: '#fff', color: '#e03c32', whiteSpace: 'nowrap', alignSelf: 'flex-start' } }, 'Add')));
+      // Renders an opportunity's stored plain text (**bold**, _italic_, "- "
+      // bullets) as safe React nodes — never raw HTML, so nothing a member
+      // types can inject markup; it's just parsed back into elements.
+      const renderRich = text => {
+        const inline = line => {
+          const parts = []; const re = /\*\*(.+?)\*\*|_(.+?)_/g; let last = 0, m, i = 0;
+          while ((m = re.exec(line))) {
+            if (m.index > last) parts.push(line.slice(last, m.index));
+            parts.push(m[1] !== undefined ? h('strong', { key: i++ }, m[1]) : h('em', { key: i++ }, m[2]));
+            last = re.lastIndex;
+          }
+          if (last < line.length) parts.push(line.slice(last));
+          return parts.length ? parts : [line];
+        };
+        const out = []; let bullets = null;
+        String(text || '').split(/\r?\n/).forEach((line, li) => {
+          const bm = line.match(/^\s*[-*]\s+(.*)$/);
+          if (bm) { (bullets || (bullets = [])).push(h('li', { key: li }, inline(bm[1]))); return; }
+          if (bullets) { out.push(h('ul', { key: 'ul' + li, style: { margin: '.2rem 0', paddingLeft: '1.1rem' } }, bullets)); bullets = null; }
+          out.push(line.trim() === '' ? h('br', { key: 'br' + li }) : h('div', { key: li }, inline(line)));
+        });
+        if (bullets) out.push(h('ul', { key: 'ul-end', style: { margin: '.2rem 0', paddingLeft: '1.1rem' } }, bullets));
+        return out;
+      };
       const favCount = Object.keys(st.favorites || {}).length;
       const star = (filled, sz) => h('svg', { width: sz || 18, height: sz || 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.4, strokeLinecap: 'round', style: { flex: '0 0 auto' } }, h('path', { d: 'M12 3.4V20.6 M4.55 7.7L19.45 16.3 M4.55 16.3L19.45 7.7' }));
       // Favorites need a signed-in identity to persist against — hidden for anonymous browsers.
@@ -733,6 +793,15 @@
       const field = (label, val) => val ? h('div', { style: { marginBottom: '1.1rem' } },
         h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.3rem' } }, label),
         h('div', { style: { fontSize: '.9rem', lineHeight: 1.5, color: '#0f153b', whiteSpace: 'pre-wrap' } }, val)) : null;
+      // Sources are collapsed behind a button rather than always shown —
+      // keyed by company id so switching companies starts collapsed again.
+      const sourcesOpen = !!sel && st.sourcesOpenFor === sel.id;
+      const sourcesBlock = (activeAssess.sources && activeAssess.sources.length) ? h('div', { style: { marginBottom: '1.1rem' } },
+        h('button', { onClick: () => this.setState(s => ({ sourcesOpenFor: s.sourcesOpenFor === sel.id ? null : sel.id })), style: { cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid rgba(28,28,28,.18)', background: sourcesOpen ? '#f0f0ee' : '#fff', color: '#0f153b', display: 'inline-flex', alignItems: 'center', gap: '.4rem', fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', borderRadius: '100vw', padding: '.4rem .9rem' } },
+          'Sources (' + activeAssess.sources.length + ')',
+          h('span', { style: { fontSize: '.7rem', display: 'inline-block', transform: sourcesOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' } }, '▾')),
+        sourcesOpen ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem', marginTop: '.6rem' } },
+          activeAssess.sources.map((s, i) => h('a', { key: i, href: s, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.82rem', wordBreak: 'break-all' } }, (i + 1) + '. ' + s))) : null) : null;
 
       // Comments — live, shared thread stored in the "Comments" sheet tab (see Comments.gs).
       // Open to everyone who's entered the site — not admin-gated.
@@ -741,17 +810,23 @@
       // always-open composer (see oppBadge on the card preview for the
       // same pattern).
       const oppSectionOpen = !!sel && st.oppOpenFor === sel.id;
-      const opportunitiesSection = !sel ? null : h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+      const opportunitiesSection = !sel ? null : h('div', { style: { height: '100%', boxSizing: 'border-box', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
         h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.75rem', marginBottom: '.6rem' } },
           h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80' } },
             'Prospective opportunities' + ((sel.engagementIdeas || []).length ? ' (' + sel.engagementIdeas.length + ')' : '')),
           h('button', { onClick: () => this.setState(s => ({ oppOpenFor: s.oppOpenFor === sel.id ? null : sel.id })), title: 'Add an opportunity', style: { cursor: 'pointer', fontFamily: 'inherit', border: '1.5px solid #e03c32', background: oppSectionOpen ? '#e03c32' : '#fff', color: oppSectionOpen ? '#fff' : '#e03c32', display: 'inline-flex', alignItems: 'center', gap: '.3rem', fontSize: '.78rem', fontWeight: 500, borderRadius: '100vw', padding: '.3rem .75rem', flex: '0 0 auto' } }, oppIcon, 'Add')),
         (sel.engagementIdeas && sel.engagementIdeas.length) ? h('ul', { style: { margin: '0 0 ' + (oppSectionOpen ? '.85rem' : 0), paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '.4rem' } },
-          sel.engagementIdeas.map((idea, i) => h('li', { key: i, style: { fontSize: '.85rem', color: '#0f153b' } }, idea)))
+          sel.engagementIdeas.map((idea, i) => h('li', { key: i, style: { fontSize: '.85rem', color: '#0f153b' } }, renderRich(idea))))
           : h('div', { style: { fontSize: '.8rem', color: '#9aa0b4', marginBottom: oppSectionOpen ? '.85rem' : 0 } }, 'No opportunities on file yet — be the first to add one.'),
-        oppSectionOpen ? h('div', { style: { display: 'flex', gap: '.5rem' } },
-          h('input', { value: (st.oppDrafts || {})[sel.id] || '', onChange: e => this.setState(s => ({ oppDrafts: Object.assign({}, s.oppDrafts, { [sel.id]: e.target.value }) })), onKeyDown: e => { if (e.key === 'Enter') this.addOpportunity(sel.id, sel.company); }, placeholder: 'Add an opportunity…', autoFocus: true, style: { flex: 1, padding: '.55rem .8rem', borderRadius: '.5rem', border: '1.5px solid rgba(28,28,28,.18)', fontFamily: 'inherit', fontSize: '.85rem', boxSizing: 'border-box' } }),
-          h('button', { onClick: () => this.addOpportunity(sel.id, sel.company), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid #e03c32', background: '#e03c32', color: '#fff', whiteSpace: 'nowrap' } }, 'Post')) : null);
+        oppComposer(sel));
+      const priorityNotesBox = (sel && sel.top10Notes) ? h('div', { style: { height: '100%', boxSizing: 'border-box', border: '1.5px solid #f3b8b4', background: '#fdefee', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
+        h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.25rem' } }, 'Priority account notes'),
+        h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.top10Notes)) : null;
+      // Priority account notes + prospective opportunities are the two
+      // "what should we do about this company" boxes, so they sit side by
+      // side at the very top of the drawer, before anything else.
+      const topBoxesRow = !sel ? null : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '1rem', marginBottom: '1.25rem', alignItems: 'stretch' } },
+        priorityNotesBox, opportunitiesSection);
 
       const commentsSection = !sel ? null : h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid rgba(28,28,28,.1)', background: '#f9f9f7', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
         h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.6rem' } },
@@ -783,6 +858,7 @@
               h('button', { onClick: () => this.setState({ assessmentTab: 'current' }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'current' ? '#8c4799' : 'transparent', color: assessmentTab === 'current' ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, 'Current — ' + (sel.lastReassessed || sel.assessmentDate || 'undated')),
               sel.previousAssessments.map((p, i) => h('button', { key: i, onClick: () => this.setState({ assessmentTab: 'prev' + i }), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.8rem', fontWeight: 500, padding: '.4rem .9rem', borderRadius: '100vw', border: 'none', background: assessmentTab === 'prev' + i ? '#8c4799' : 'transparent', color: assessmentTab === 'prev' + i ? '#fff' : '#0f153b', whiteSpace: 'nowrap' } }, p.date || 'Undated'))) : null,
             h('div', { style: { display: 'flex', gap: '.5rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' } }, badge(activeAssess.overall), !activeAssess.isCurrent ? tag('Past assessment', '#9aa0b4') : null, sel.ttpc ? tag('TTPC partner', '#8c4799') : null, sel.adCouncil ? tag('Ad Council board', '#e87722') : null, sel.top10 ? tag('Priority account', '#e03c32') : null, sel.industry ? h('span', { className: 'u-text-style-small u-color-faded' }, sel.industry) : null),
+            topBoxesRow,
             (activeAssess.isCurrent && changesSinceLast) ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid ' + (changesSinceLast.items.length || changesSinceLast.scoreLine ? '#c7e3f0' : 'rgba(28,28,28,.1)'), background: (changesSinceLast.items.length || changesSinceLast.scoreLine) ? '#eef7fb' : '#f9f9f7', borderRadius: '.8rem', padding: '.85rem 1rem' } },
               h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#2b7ea1', marginBottom: '.5rem' } }, 'Changes since ' + (changesSinceLast.since || 'last assessment')),
               (changesSinceLast.items.length || changesSinceLast.scoreLine) ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem' } },
@@ -792,8 +868,6 @@
             sel.parentNote ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid #d9bfe0', background: '#f3e9f5', borderRadius: '.8rem', padding: '.85rem 1rem', display: 'flex', gap: '.6rem', alignItems: 'flex-start' } },
               h('span', { style: { fontSize: '1rem', lineHeight: 1.2, flex: '0 0 auto' } }, 'ⓘ'),
               h('div', null, h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#8c4799', marginBottom: '.25rem' } }, 'Coalition status'), h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.parentNote))) : null,
-            sel.top10Notes ? h('div', { style: { marginBottom: '1.25rem', border: '1.5px solid #f3b8b4', background: '#fdefee', borderRadius: '.8rem', padding: '.85rem 1rem' } },
-              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.25rem' } }, 'Priority account notes'), h('div', { style: { fontSize: '.85rem', lineHeight: 1.5, color: '#0f153b' } }, sel.top10Notes)) : null,
             (sel.board && sel.board.length) ? h('div', { style: { marginBottom: '1.4rem', border: '1.5px solid #f0dcc4', background: '#fdf7ef', borderRadius: '.8rem', padding: '1rem 1.1rem' } },
               h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#b5651d', marginBottom: '.6rem' } }, 'Ad Council board — ' + sel.board.length + (sel.board.length === 1 ? ' member' : ' members')),
               h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.5rem' } }, sel.board.map((m, i) => h('div', { key: i, style: { display: 'flex', gap: '.75rem', alignItems: 'center', justifyContent: 'space-between', background: '#fff', border: '1px solid rgba(28,28,28,.08)', borderRadius: '.6rem', padding: '.6rem .8rem' } },
@@ -811,6 +885,7 @@
                 engById[sel.id].ttpc ? h('div', null, h('div', { style: { fontSize: '1.15rem', fontWeight: 600, color: '#e87722' } }, engById[sel.id].ttpc), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'Tear the Paper Ceiling visits')) : null,
                 engById[sel.id].recentWeek ? h('div', null, h('div', { style: { fontSize: '.85rem', fontWeight: 500, color: '#0f153b', marginTop: '.15rem' } }, engById[sel.id].recentWeek), h('div', { style: { fontSize: '.75rem', color: '#6b6f80' } }, 'most recent activity')) : null),
               engById[sel.id].topPages.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.3rem' } }, engById[sel.id].topPages.slice(0, 5).map((p, i) => h('div', { key: i, style: { display: 'flex', gap: '.5rem', fontSize: '.8rem', alignItems: 'baseline' } }, h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#4a4e60' } }, p.page || p.url || p.path), p.visits != null ? h('span', { style: { flex: '0 0 auto', color: '#6b6f80', fontVariantNumeric: 'tabular-nums' } }, p.visits + (p.visits === 1 ? ' visit' : ' visits')) : null))) : null) : null,
+            field(activeAssess.isCurrent ? 'Current assessment date' : 'Assessment date', activeAssess.isCurrent ? (sel.lastReassessed || sel.assessmentDate) : activeAssess.date),
             field('Overall classification reasoning', linkify(activeAssess.overallWhy, activeAssess.sources)),
             activeAssess.isCurrent ? field("What we've done together", sel.doneTogether) : null,
             !activeAssess.isCurrent && activeAssess.scoreDelta ? field('Score change', activeAssess.scoreDelta) : null,
@@ -821,12 +896,8 @@
                 cc.why ? h('p', { style: { margin: 0, fontSize: '.82rem', lineHeight: 1.45, color: '#4a4e60', whiteSpace: 'pre-wrap' } }, linkify(cc.why, activeAssess.sources)) : null) : null; })),
             activeAssess.isCurrent ? field('International context', sel.international) : null,
             activeAssess.isCurrent ? field('Edge case flags', sel.edgeFlags) : null,
-            field(activeAssess.isCurrent ? 'Current assessment date' : 'Assessment date', activeAssess.isCurrent ? (sel.lastReassessed || sel.assessmentDate) : activeAssess.date),
             activeAssess.isCurrent ? field('Latest change', [sel.lastChangeDirection, sel.latestChangeSummary].filter(Boolean).join(' — ')) : null,
-            (activeAssess.sources && activeAssess.sources.length) ? h('div', { style: { marginBottom: '1.1rem' } },
-              h('div', { style: { fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#6b6f80', marginBottom: '.4rem' } }, 'Sources (' + activeAssess.sources.length + ')'),
-              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem' } }, activeAssess.sources.map((s, i) => h('a', { key: i, href: s, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.82rem', wordBreak: 'break-all' } }, (i + 1) + '. ' + s)))) : null,
-            opportunitiesSection,
+            sourcesBlock,
             commentsSection,
             h('div', { style: { display: 'flex', gap: '.6rem', marginTop: '1.5rem', borderTop: '1.5px solid rgba(28,28,28,.1)', paddingTop: '1.25rem', flexWrap: 'wrap' } },
               engById[sel.id] ? actionBtn('View website engagement →', () => { const e = engById[sel.id]; this.setState({ page: 'engagement', engQ: e.company, engExpanded: { [e.company]: true }, selectedId: null }); window.scrollTo({ top: 0 }); }) : null,
@@ -1078,7 +1149,7 @@
         c.top10Notes ? h('p', { className: 'u-text-style-small', style: { margin: 0, color: '#0f153b' } }, c.top10Notes) : null,
         (c.engagementIdeas && c.engagementIdeas.length) ? h('div', { style: { background: '#fdefee', border: '1px solid #f3b8b4', borderRadius: '.6rem', padding: '.7rem .85rem' } },
           h('div', { style: { fontSize: '.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.03em', color: '#e03c32', marginBottom: '.35rem' } }, 'Engagement ideas'),
-          h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '.82rem', lineHeight: 1.5, color: '#0f153b' } }, c.engagementIdeas.map((idea, i) => h('li', { key: i }, idea)))) : null,
+          h('ul', { style: { margin: 0, paddingLeft: '1.1rem', fontSize: '.82rem', lineHeight: 1.5, color: '#0f153b' } }, c.engagementIdeas.map((idea, i) => h('li', { key: i }, renderRich(idea))))) : null,
         oppComposer(c));
       const priorityPage = h('section', { className: 'section u-theme-light', style: { paddingTop: '3rem', paddingBottom: '3rem' } },
         h('div', { className: 'u-container' },

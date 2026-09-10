@@ -272,8 +272,14 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   administrator account — any signed-in member can, on the small icon
   badge on a company's card (in the directory grid or the Priority
   Prospects page) or the "Add" button in its full detail card's
-  "Prospective opportunities" section, both of which reveal a one-line
-  composer rather than showing one open all the time. A company being
+  "Prospective opportunities" section, both of which reveal the same
+  composer rather than showing one open all the time. That composer has a
+  small **Bold / Italic / Bullet list** toolbar; the `Opportunity` cell is
+  still stored as plain text (`**bold**`, `_italic_`, `- ` bullet lines —
+  ordinary Markdown-ish conventions, readable and editable directly in the
+  sheet too), and the app parses that back into formatted text wherever an
+  opportunity is shown. It's parsed into React elements, never rendered as
+  raw HTML, so nothing anyone types can inject markup. A company being
   flagged as a priority account only controls whether it appears on the
   **Priority Prospects page**; its opportunities are visible everywhere
   regardless.
