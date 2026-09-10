@@ -14,9 +14,9 @@
 <header style="position:sticky;top:0;z-index:30;background:#ffffff;border-bottom:1.5px solid rgba(28,28,28,0.1);">
   <div class="u-container u-hflex-between-center" style="padding-top:0.9rem;padding-bottom:0.9rem;gap:1.5rem;flex-wrap:wrap;">
     <div class="u-hflex-left-center u-gap-4" style="flex:0 0 auto;">
-      <img src="<?= getLogoDataUri() ?>" alt="Opportunity@Work" style="height:2rem;width:auto;">
+      <img src="<?!= getLogoDataUri() ?>" alt="Opportunity@Work" style="height:2rem;width:auto;">
       <span style="width:1.5px;height:1.75rem;background:rgba(28,28,28,.15);display:inline-block;"></span>
-      <img src="<?= getPartnerLogoDataUri() ?>" alt="Ad Council" style="height:2rem;width:auto;border-radius:0.25rem;">
+      <img src="<?!= getPartnerLogoDataUri() ?>" alt="Ad Council" style="height:2rem;width:auto;border-radius:0.25rem;">
       <span style="width:1.5px;height:1.75rem;background:rgba(28,28,28,.15);display:inline-block;"></span>
       <span class="u-text-style-main u-weight-semi-bold" style="letter-spacing:-0.02em;">Skills-First Journey Tracker</span>
     </div>
@@ -28,15 +28,15 @@
   <div id="sfj-root" style="font-family: DM Sans; font-weight: 500"></div>
 </main>
 <script>
-  window.SFJ_LOGO_DATA_URI = "<?= getLogoDataUri() ?>";
-  window.SFJ_PARTNER_LOGO_DATA_URI = "<?= getPartnerLogoDataUri() ?>";
+  window.SFJ_LOGO_DATA_URI = "<?!= getLogoDataUri() ?>";
+  window.SFJ_PARTNER_LOGO_DATA_URI = "<?!= getPartnerLogoDataUri() ?>";
 </script>
 
 <footer class="u-theme-dark" style="padding-top:3rem;padding-bottom:3rem;margin-top:4rem;">
   <div class="u-container u-hflex-between-center u-text-style-small u-color-faded" style="flex-wrap:wrap;gap:1rem;">
     <div class="u-hflex-left-center u-gap-3">
-      <img src="<?= getLogoDataUri() ?>" alt="Opportunity@Work" style="height:1.75rem;width:auto;filter:brightness(0) invert(1);">
-      <img src="<?= getPartnerLogoWhiteDataUri() ?>" alt="Ad Council" style="height:1.75rem;width:auto;">
+      <img src="<?!= getLogoDataUri() ?>" alt="Opportunity@Work" style="height:1.75rem;width:auto;filter:brightness(0) invert(1);">
+      <img src="<?!= getPartnerLogoWhiteDataUri() ?>" alt="Ad Council" style="height:1.75rem;width:auto;">
       <span>Skills-First Journey Tracker — internal coalition tool</span>
     </div>
     <span>© 2026 Opportunity@Work</span>

@@ -27,12 +27,23 @@ function readEngagement_() {
       }
     }
     var company = get_(r, 'Company');
+    var oaw = parseFloat(get_(r, 'O&W Visits') || get_(r, 'O@W Visits')) || 0;
+    var ttpc = parseFloat(get_(r, 'TTPC Visits')) || 0;
+    var rawTotal = parseFloat(get_(r, 'Total Visits')) || 0;
+    // The KPI row at the top of the Website Engagement page shows "Total
+    // visits" alongside the O@W/TTPC breakdown, and those two should always
+    // add up to it — there's no third tracked property. Rather than trust
+    // a separately-typed "Total Visits" cell to stay in sync with the O&W/
+    // TTPC columns (easy to let drift when updating one and not the other),
+    // derive it from the breakdown whenever either is present; only fall
+    // back to the raw cell for a row that has no breakdown recorded at all.
+    var total = (oaw || ttpc) ? (oaw + ttpc) : rawTotal;
     return {
       company: company, id: slugify_(company),
-      total: parseFloat(get_(r, 'Total Visits')) || 0,
+      total: total,
       unique: parseFloat(get_(r, 'Unique Pages')) || 0,
-      oaw: parseFloat(get_(r, 'O&W Visits') || get_(r, 'O@W Visits')) || 0,
-      ttpc: parseFloat(get_(r, 'TTPC Visits')) || 0,
+      oaw: oaw,
+      ttpc: ttpc,
       recentWeek: get_(r, 'Most Recent Week'),
       logo: get_(r, 'Logo'),
       topPages: topPages,
