@@ -15,6 +15,10 @@
 (function () {
   var h = React.createElement, F = React.Fragment;
 
+  // How often the app silently re-reads companies/engagement from the
+  // Sheet while a tab is open and signed in (componentDidMount, below).
+  var AUTO_REFRESH_MS = 2 * 60 * 1000;
+
   var DEFAULT_STAGES = ["Hasn't begun the Journey", "Starting the Journey", "On the Journey", "Leading the Journey"];
   var DEFAULT_CATS = [
     { key: 'laborMarket', label: 'Labor Market-shaping' },
@@ -97,7 +101,22 @@
       this.fileRef = React.createRef();
     }
 
-    componentDidMount() { this.bootstrap(); }
+    componentDidMount() {
+      this.bootstrap();
+      // Auto-refresh: re-reads companies/engagement from the Sheet on a
+      // timer, same call as the manual "Refresh from Sheet" button, just
+      // silent and unattended so a tab left open doesn't go stale. Only
+      // once signed in (api_refresh needs a session, and there's nothing
+      // to refresh before the entry gate); skips a tick if a refresh is
+      // already in flight, so a slow response can't stack up overlapping
+      // requests.
+      this.autoRefreshTimer = setInterval(() => {
+        if (this.state.auth && !this.state.syncing) this.refreshFromSheet(true);
+      }, AUTO_REFRESH_MS);
+    }
+    componentWillUnmount() {
+      if (this.autoRefreshTimer) clearInterval(this.autoRefreshTimer);
+    }
 
     // ---------- bootstrap / server bridge ----------
     bootstrap() {
@@ -116,11 +135,16 @@
         .withFailureHandler(err => this.setState({ loading: false, bootError: (err && err.message) || String(err) }))
         .api_bootstrap(this.token);
     }
-    refreshFromSheet() {
+    // silent=true (the auto-refresh timer) skips the toast on both success
+    // and failure — this fires every AUTO_REFRESH_MS on a signed-in tab, so
+    // popping a toast every 2 minutes would just be noise. The manual
+    // "Refresh from Sheet" buttons still call this with no argument, so
+    // clicking one keeps its explicit confirmation (or failure) toast.
+    refreshFromSheet(silent) {
       this.setState({ syncing: true });
       google.script.run
-        .withSuccessHandler(res => { this.setState({ companies: res.companies, engagement: res.engagement, syncing: false, liveSync: { ok: true, at: Date.now() } }); this.flash('Refreshed from the Google Sheet'); })
-        .withFailureHandler(err => { this.setState({ syncing: false, liveSync: { ok: false, at: Date.now(), error: (err && err.message) || String(err) } }); this.flash('Refresh failed — showing last-known data.'); })
+        .withSuccessHandler(res => { this.setState({ companies: res.companies, engagement: res.engagement, syncing: false, liveSync: { ok: true, at: Date.now() } }); if (!silent) this.flash('Refreshed from the Google Sheet'); })
+        .withFailureHandler(err => { this.setState({ syncing: false, liveSync: { ok: false, at: Date.now(), error: (err && err.message) || String(err) } }); if (!silent) this.flash('Refresh failed — showing last-known data.'); })
         .api_refresh(this.token);
     }
     refreshActivity() {

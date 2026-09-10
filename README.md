@@ -161,6 +161,22 @@ thing `CacheService` is used for is admin session tokens (`Auth.gs`), never
 company data, so there's no stale-data path to worry about: the app always
 reflects whatever is in the Sheet right now.
 
+**Auto-refresh:** a signed-in tab also calls `api_refresh` on its own every
+`AUTO_REFRESH_MS` (`JavaScript.html`, default 2 minutes — change that one
+constant to retune it), so a page left open picks up sheet edits made
+elsewhere without anyone clicking "Refresh from Sheet." It's silent (no
+toast) on both success and failure, skips a tick if a refresh is already
+in flight, and only runs once a session exists — nothing runs before the
+entry gate, since `api_refresh` requires one. The manual "Refresh from
+Sheet" buttons are unaffected (same function, called without the silent
+flag, so they still confirm or report failure). If a live deployment's
+refresh still looks stale after this, redeploy — `clasp push` /
+copying files updates the script but not an already-published `/exec`
+deployment (Deploy → Manage deployments → edit the deployment → new
+version, or Deploy → New deployment); a stale pinned deployment is by far
+the most common reason something that works in this repo doesn't show up
+live.
+
 **Website Engagement accuracy:** the four numbers at the top of the
 Website Engagement page — companies with recorded visits, total visits,
 Tear the Paper Ceiling visits, and Opportunity@Work visits — are always
