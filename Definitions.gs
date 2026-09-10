@@ -18,14 +18,21 @@ function readDefinitions_() {
  * Resources ("Resources" tab) — the Ad Council board resources page content.
  * Read live so this stays admin-editable in Sheets, same as Definitions.
  *
- * Columns: Section | Title | Body. Section is free text but must say which
- * of the three groups a row belongs in — any of the labels below are
+ * Columns: Section | Title | Body | Link. Section is free text but must say
+ * which of the three groups a row belongs in — any of the labels below are
  * accepted (case-insensitive), so type whichever reads naturally:
  *   - "Universal menu"              -> how ANY board member can help
  *   - "Turnkey" / "Before joining TTPC" -> first steps before formally joining
  *   - "Board-only" / "Exclusive"    -> perks exclusive to Ad Council board members
  * Unrecognized Section values are skipped (not shown), so a typo just means
  * that row silently doesn't appear — check spelling against the list above.
+ *
+ * Link is optional — add a URL to a row and the app shows it as a clickable
+ * link plus a one-click "Copy link" button under that item, so board members
+ * can grab and share it without hunting for the source themselves. Leave it
+ * blank for a resource that isn't a specific URL (e.g. "Host or speak at a
+ * coalition event"). If the tab doesn't have a Link column yet, add one —
+ * existing rows are untouched (get_() just returns '' for a missing cell).
  */
 var RESOURCE_SECTION_ALIASES = {
   'universal menu': 'universalMenu', 'universalmenu': 'universalMenu',
@@ -41,7 +48,7 @@ function readResources_() {
   t.rows.forEach(function (r) {
     var raw = get_(r, 'Section');
     var section = RESOURCE_SECTION_ALIASES[raw.toLowerCase().trim()] || (out[raw] ? raw : null);
-    var item = { title: get_(r, 'Title'), body: get_(r, 'Body') };
+    var item = { title: get_(r, 'Title'), body: get_(r, 'Body'), link: get_(r, 'Link') };
     if (section && out[section] && item.title) out[section].push(item);
   });
   return out;

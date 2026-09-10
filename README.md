@@ -268,11 +268,20 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
   up on next load/refresh — nothing to redeploy.
 - **Definitions** / **Resources** — the classification rubric and the Ad
   Council resources-page copy. Editable directly in Sheets; changes show up
-  live, no code change. **Resources** columns: `Section | Title | Body` —
-  `Section` accepts (case-insensitively) "Universal menu", "Turnkey" /
-  "Before joining TTPC", or "Board-only" / "Exclusive"; a misspelled Section
-  value just means that row silently doesn't show, so double-check it
-  against those three if a row you added doesn't appear.
+  live, no code change. **Resources** columns: `Section | Title | Body |
+  Link` — `Section` accepts (case-insensitively) "Universal menu", "Turnkey"
+  / "Before joining TTPC", or "Board-only" / "Exclusive"; a misspelled
+  Section value just means that row silently doesn't show, so double-check
+  it against those three if a row you added doesn't appear. `Link` is
+  optional — paste a URL there and that resource shows a clickable link
+  plus a one-click "Copy link" button on the Resources page, so board
+  members can grab and share it without digging for the source themselves;
+  leave it blank for a resource that isn't a specific URL (e.g. "Host or
+  speak at a coalition event"). If your Resources tab predates this column,
+  just add a `Link` header cell yourself — the app reads by header name, so
+  it picks it up immediately, no code change or redeploy needed for the
+  data itself (existing rows are untouched; only new/edited rows need a
+  value in it).
 - **Priority Prospect Opportunities** — explicit engagement ideas for **any**
   company (not only ones flagged as a priority account), one row per idea.
   Columns: `Company | Opportunity | Status | Notes | Added By | Added Date`.

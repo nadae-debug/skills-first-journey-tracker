@@ -32,7 +32,7 @@ function oneTimeSetup() {
   ensureTab_(ss, TAB_FAVORITES, ['Email', 'CompanyId', 'CreatedAt']);
   ensureTab_(ss, TAB_OVERRIDES, ['CompanyId', 'ExtraJSON', 'UpdatedAt']);
   ensureTab_(ss, TAB_DEFINITIONS, ['id', 'defType', 'category', 'type', 'definition', 'evidence']);
-  ensureTab_(ss, TAB_RESOURCES, ['Section', 'Title', 'Body']);
+  ensureTab_(ss, TAB_RESOURCES, ['Section', 'Title', 'Body', 'Link']);
   ensureTab_(ss, TAB_COMMENTS, ['CompanyId', 'Timestamp', 'WhoName', 'WhoEmail', 'Role', 'Comment']);
   ensureTab_(ss, TAB_ENGAGEMENT, engagementHeaders_());
   ensureTab_(ss, TAB_OPPORTUNITIES, OPPORTUNITY_HEADERS);
@@ -69,9 +69,9 @@ function seedResourcesIfEmpty_(ss) {
   var labels = { universalMenu: 'Universal menu', turnkey: 'Turnkey (before joining TTPC)', exclusive: 'Board-only (exclusive)' };
   var rows = [];
   ['universalMenu', 'turnkey', 'exclusive'].forEach(function (section) {
-    (RESOURCES_SEED[section] || []).forEach(function (item) { rows.push([labels[section], item.title, item.body]); });
+    (RESOURCES_SEED[section] || []).forEach(function (item) { rows.push([labels[section], item.title, item.body, item.link || '']); });
   });
-  if (rows.length) sh.getRange(2, 1, rows.length, 3).setValues(rows);
+  if (rows.length) sh.getRange(2, 1, rows.length, 4).setValues(rows);
 }
 
 /** Header shape Engagement.gs's readEngagement_() expects (Config.gs's

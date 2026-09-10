@@ -402,6 +402,13 @@
       if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => this.flash('Copied ' + rows.length + ' companies to clipboard')).catch(() => this.flash('Copy failed — try Open email'));
       else this.flash('Clipboard not available');
     }
+    // Ad Council Resources page — a resource's Link (Resources sheet tab)
+    // one-click copy, so a board member can grab and share it without
+    // hunting for the source themselves.
+    copyLink(url) {
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => this.flash('Link copied')).catch(() => this.flash('Could not copy — select and copy the link manually'));
+      else this.flash('Clipboard not available — select and copy the link manually');
+    }
 
     // ---------- mutations (write through to the Sheet via SheetData.gs) ----------
     blank() { return this.norm({ company: '', overall: this.STAGES[0] }); }
@@ -1166,7 +1173,12 @@
       const resourceCard = (item, color) => h('div', { key: item.title, className: 'card', style: { padding: '1.25rem 1.4rem', background: '#fff' } },
         h('div', { style: { display: 'flex', gap: '.6rem', alignItems: 'flex-start' } },
           h('span', { style: { width: '.55rem', height: '.55rem', borderRadius: '100vw', background: color, flex: '0 0 auto', marginTop: '.45rem' } }),
-          h('div', null, h('div', { className: 'u-weight-medium', style: { fontSize: '.95rem', marginBottom: '.3rem' } }, item.title), h('p', { className: 'u-text-style-small u-color-faded', style: { margin: 0 } }, item.body))));
+          h('div', { style: { minWidth: 0, flex: 1 } },
+            h('div', { className: 'u-weight-medium', style: { fontSize: '.95rem', marginBottom: '.3rem' } }, item.title),
+            h('p', { className: 'u-text-style-small u-color-faded', style: { margin: 0 } }, item.body),
+            item.link ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '.5rem', marginTop: '.65rem', flexWrap: 'wrap' } },
+              h('a', { href: /^https?:/i.test(item.link) ? item.link : 'https://' + item.link, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.8rem', wordBreak: 'break-all', minWidth: 0 } }, item.link.replace(/^https?:\/\//, '')),
+              h('button', { onClick: () => this.copyLink(item.link), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.72rem', fontWeight: 500, padding: '.2rem .6rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.18)', background: '#fff', color: '#0f153b', flex: '0 0 auto' } }, 'Copy link')) : null)));
       const resourceSection = (eyebrow, heading, items, color) => h('div', { style: { marginBottom: '3rem' } },
         h('div', { className: 'g-eyebrow', style: { marginBottom: '.6rem' } }, eyebrow),
         h('h2', { className: 'u-text-style-h5 u-weight-medium', style: { margin: '0 0 1.25rem' } }, heading),
