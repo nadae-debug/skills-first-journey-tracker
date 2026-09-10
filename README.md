@@ -253,7 +253,19 @@ Every tab below lives in the **same workbook** as "Master Spreadsheet"
 - **Master Spreadsheet** (existing, owned by the assessment team) — company
   name, classifications/reasoning per dimension, board members, points of
   contact, sources, priority-account flag/notes, etc. Read fresh on every
-  page load; written back on every admin save/delete/import. The sheet
+  page load; written back on every admin save/delete/import. Its
+  `Source Link 1`…`Source Link 17` columns support the same `Title | URL`
+  convention as Resources' Link and Website Engagement's Top Page N URL
+  (e.g. `NBER working paper | https://nber.org/papers/w12345`) — a source
+  shows with that title instead of the raw link wherever it's cited: the
+  "Sources" list in a company's detail card, and the `[1]`, `[2]`, …
+  citation markers inside classification reasoning text. Unlike the other
+  two, this one is parsed on the client (`JavaScript.html`'s
+  `parseLabeledUrl`/`normalizeUrl`), not read that way by the server —
+  sources are also free-typed directly in the admin edit form's "Source
+  links" textarea, so the raw string is kept as-is end to end and only
+  interpreted where it's rendered as a link. A bare URL with no `|` still
+  works exactly as before. The sheet
   column is still named `Top 10` (renaming it would break existing data —
   only the app's on-screen label changed, to "Priority account," since the
   list has grown past ten companies); `top10`/`top10Notes` stay the field

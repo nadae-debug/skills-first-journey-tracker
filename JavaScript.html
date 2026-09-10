@@ -19,6 +19,25 @@
   // Sheet while a tab is open and signed in (componentDidMount, below).
   var AUTO_REFRESH_MS = 2 * 60 * 1000;
 
+  // Client-side mirror of Util.gs's parseLabeledUrl_ — sources (Master
+  // Spreadsheet's "Source Link N" columns) support the same `Title | URL`
+  // convention as Resources' Link and Website Engagement's Top Page N URL,
+  // but that column is read as plain strings (SheetData.gs, unlike the
+  // other two) since sources are also free-typed in the admin edit form's
+  // "Source links" textarea — so parsing happens here, at render/export
+  // time, instead. Module-scoped (not inside render()) so downloadCompany
+  // can use it too, not just the React tree.
+  function parseLabeledUrl(raw) {
+    raw = String(raw || '').trim();
+    if (!raw) return null;
+    var i = raw.indexOf('|');
+    if (i === -1) return { label: '', url: raw };
+    var label = raw.slice(0, i).trim();
+    var url = raw.slice(i + 1).trim();
+    return url ? { label: label, url: url } : null;
+  }
+  function normalizeUrl(url) { return /^https?:/i.test(url) ? url : 'https://' + url; }
+
   var DEFAULT_STAGES = ["Hasn't begun the Journey", "Starting the Journey", "On the Journey", "Leading the Journey"];
   var DEFAULT_CATS = [
     { key: 'laborMarket', label: 'Labor Market-shaping' },
@@ -227,7 +246,7 @@
       const c = this.state.companies.find(x => x.id === id); if (!c) return;
       const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const cats = (this.CATS || []).map(k => { const cc = c.categories[k.key] || {}; if (!cc.cls && !cc.why) return ''; return '<div style="border:1px solid #e5e2ea;border-radius:10px;padding:12px 14px;margin:0 0 8px"><div style="font-weight:500">' + esc(k.label) + ' &middot; <span style="color:#8c4799">' + esc(cc.cls || '—') + '</span></div>' + (cc.why ? '<div style="font-size:13px;color:#4a4e60;margin-top:4px">' + esc(cc.why) + '</div>' : '') + '</div>'; }).join('');
-      const src = (c.sources || []).map((s, i) => (i + 1) + '. <a href="' + esc(s) + '" style="color:#8c4799">' + esc(s) + '</a>').join('<br>');
+      const src = (c.sources || []).map((s, i) => { const parsed = parseLabeledUrl(s); if (!parsed) return ''; return (i + 1) + '. <a href="' + esc(normalizeUrl(parsed.url)) + '" style="color:#8c4799">' + esc(parsed.label || parsed.url) + '</a>'; }).filter(Boolean).join('<br>');
       const board = (c.board || []).map(m => esc(m.name) + (m.title ? ' — ' + esc(m.title) : '') + (m.role ? ' (' + esc(m.role) + (m.ec ? ', Exec Committee' : '') + ')' : '')).join('<br>');
       // Per project rule (CLAUDE.md): never include "Where things stand now", edge case
       // flags, or account owner in anything shared/downloaded — omitted below on purpose.
@@ -393,7 +412,10 @@
         if (detail === 'full') {
           if (c.overallWhy) lines.push('  Why this classification: ' + c.overallWhy);
           this.CATS.forEach(k => { const cc = c.categories[k.key] || {}; lines.push('  - ' + k.label + ': ' + cc.cls + (cc.why ? ' — ' + cc.why : '')); });
-          if (c.sources && c.sources.length) lines.push('  Sources: ' + c.sources.join('  |  '));
+          if (c.sources && c.sources.length) {
+            const srcText = c.sources.map(s => { const parsed = parseLabeledUrl(s); if (!parsed) return null; return parsed.label ? parsed.label + ' (' + parsed.url + ')' : parsed.url; }).filter(Boolean).join('  |  ');
+            if (srcText) lines.push('  Sources: ' + srcText);
+          }
         }
         lines.push('');
       });
@@ -561,7 +583,11 @@
         const parts = String(text).split(/(\[\d+\])/g);
         return parts.map((p, i) => {
           const m = p.match(/^\[(\d+)\]$/);
-          if (m) { const url = (sources || [])[+m[1] - 1]; if (url) return h('a', { key: i, href: url, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { textDecoration: 'none', fontWeight: 600 } }, p); }
+          if (m) {
+            const raw = (sources || [])[+m[1] - 1];
+            const parsed = raw && parseLabeledUrl(raw);
+            if (parsed) return h('a', { key: i, href: normalizeUrl(parsed.url), target: '_blank', rel: 'noopener', title: parsed.url, className: 'sfj-link', style: { textDecoration: 'none', fontWeight: 600 } }, p);
+          }
           return p;
         });
       };
@@ -867,7 +893,8 @@
           'Sources (' + activeAssess.sources.length + ')',
           h('span', { style: { fontSize: '.7rem', display: 'inline-block', transform: sourcesOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' } }, '▾')),
         sourcesOpen ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.35rem', marginTop: '.6rem' } },
-          activeAssess.sources.map((s, i) => h('a', { key: i, href: s, target: '_blank', rel: 'noopener', className: 'sfj-link', style: { fontSize: '.82rem', wordBreak: 'break-all' } }, (i + 1) + '. ' + s))) : null) : null;
+          activeAssess.sources.map((s, i) => { const parsed = parseLabeledUrl(s); if (!parsed) return null;
+            return h('a', { key: i, href: normalizeUrl(parsed.url), target: '_blank', rel: 'noopener', title: parsed.url, className: 'sfj-link', style: { fontSize: '.82rem', wordBreak: 'break-all' } }, (i + 1) + '. ' + (parsed.label || parsed.url)); })) : null) : null;
 
       // Comments — live, shared thread stored in the "Comments" sheet tab (see Comments.gs).
       // Open to everyone who's entered the site — not admin-gated.
@@ -1001,7 +1028,7 @@
               h('textarea', { value: cc.why || '', rows: 2, placeholder: 'Reasoning…', onChange: ev => this.setEditCat(k.key, { why: ev.target.value }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })); }),
             h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' } }, textField('International context', 'international', true), textField('Edge case flags', 'edgeFlags', true)),
             h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem' } }, textField('Assessment date', 'assessmentDate'),
-              h('div', null, lbl('Source links (one per line)'), h('textarea', { value: (e.sources || []).join('\n'), rows: 3, onChange: ev => this.setEdit({ sources: ev.target.value.split('\n').map(s => s.trim()).filter(Boolean) }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })))),
+              h('div', null, lbl('Source links (one per line — bare URL, or Title | URL for a readable link text)'), h('textarea', { value: (e.sources || []).join('\n'), rows: 3, onChange: ev => this.setEdit({ sources: ev.target.value.split('\n').map(s => s.trim()).filter(Boolean) }), style: Object.assign({}, inputStyle, { resize: 'vertical', lineHeight: 1.4 }) })))),
           h('div', { style: { padding: '1.25rem 1.75rem', borderTop: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'flex-end', gap: '.7rem', position: 'sticky', bottom: 0, background: '#fff' } },
             h('button', { onClick: () => this.cancelEdit(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.88rem', fontWeight: 500, padding: '.6rem 1.25rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Cancel'),
             actionBtn(st.isNew ? 'Add company' : 'Save changes', () => this.saveForm(), true)))) : null;
