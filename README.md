@@ -103,10 +103,17 @@ partner audience does, not auditing the administrators themselves.
 - `Setup.gs` — **run once** after deploying (see Setup below).
 - `Seed.gs` / `Assets.gs` — one-time seed content (Definitions/Resources/
   Website Engagement starting data, ported from the prototype; not read at
-  runtime except as a fallback) and the embedded logos: `getLogoDataUri()`
-  (Opportunity@Work) and `getPartnerLogoDataUri()` (Ad Council) — both are
-  read on every page load (`Index.html`'s header/footer, and the entry-gate
-  screen in `JavaScript.html`), not just as a fallback.
+  runtime except as a fallback) and the embedded logos, read on every page
+  load (`Index.html`'s header/footer, and the entry-gate screen in
+  `JavaScript.html`), not just as a fallback: `getLogoDataUri()`
+  (Opportunity@Work, light backgrounds — the header/entry-screen use it as-
+  is, the dark footer applies a CSS invert filter to it), `getPartnerLogoDataUri()`
+  (Ad Council, its normal black-square mark — used on light backgrounds),
+  and `getPartnerLogoWhiteDataUri()` (Ad Council's dedicated reversed
+  asset — a white square with the wordmark knocked out transparent — used
+  on the dark footer instead of a CSS filter, since inverting the black-
+  square mark would turn it into a white square with black text instead of
+  the intended look).
 - `Code.gs` — `doGet`, `include()`, and the `api_bootstrap` / `api_refresh`
   / `api_sendEmail` endpoints. `api_bootstrap` returns only branding/
   settings (enough to render the front gate) for a caller with no valid
