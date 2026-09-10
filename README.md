@@ -21,8 +21,9 @@ Apps Script as the thin server that reads/writes it and enforces roles.
 | Visitor (name+email, no password) + Administrator (email+password) roles | **Domain-gated entry, admin-gated editing.** The site itself is behind a front gate: enter your name + email, and the email must be at `@opportunityatwork.org` or `@adcouncil.org` (`ALLOWED_EMAIL_DOMAINS` in `Config.gs`) or entry is refused — enforced server-side (`api_enter` in `Auth.gs`), not just hidden in the UI. Once in, everyone can browse everything **and read/post company comments**. A separate "Admin login" button in the nav elevates to administrator (email+password, accounts in the Admins tab only) for editing records, the activity log, and admin management. |
 | Per-browser activity log | Shared "Activity Log" tab, read/cleared by any signed-in administrator, written on every non-admin sign-in and action |
 | Per-browser favorites | Shared "Favorites" tab, keyed by signed-in email |
-| `mailto:` / external POST endpoint for email | Real send via Apps Script `MailApp`, no config needed |
+| `mailto:` / external POST endpoint for email | "Copy" or "Open draft" (`mailto:`) only — this deployment has no real send-email connection, so a server-side send was never wired up |
 | N/A | New: a live "Comments" thread per company (shared, not local) |
+| Static bar chart + stacked bar chart on the main page | Same two charts, plus: the "Overall journey classification" chart toggles between its original bar view and a circle (donut) view, and both dashboard charts can be filtered by membership/industry (a small filter bar above them, sharing state with the directory's own filters below) |
 
 ## Access model
 
@@ -50,12 +51,16 @@ rule needed to get past the gate.
 Once entered (role `'member'`), everyone gets:
 - Full read access to the Skills-First Journey directory, Priority
   Prospects, Ad Council Resources, Website Engagement, and Definitions
-  pages, with search/filter/sort, CSV export, and per-company download
+  pages, with search/filter/sort, dashboard chart filters, and
+  per-company download (there's no portfolio-wide CSV export — a company
+  can only be downloaded one at a time; see Known gaps)
 - **Company comments** — reading and posting, on any company's detail card
 - **Prospective opportunities** — viewing and adding, for any company (not
   just ones flagged as a priority account), via a small icon on its card
   or a button in its detail card
 - "Copy" and "Open draft" (a client-side mailto link) in the share dialog
+  — there's no real send-email connection, so that's the only way to
+  share; see Known gaps
 
 A separate **"Admin login"** button sits in the nav bar (top right).
 Clicking it opens a small email + password form; only accounts already in
@@ -63,12 +68,11 @@ the `Admins` tab (added via Admin & data → Administrators, by an existing
 admin) can sign in there — there's no self-serve admin signup. Once signed
 in, the nav shows the administrator's name and a "Sign out" button, and
 these become additionally available:
-- Add / edit / delete companies, import CSV
+- Add / edit / delete companies, import CSV (bulk-editing companies from
+  the sheet — the only bulk CSV operation left in the app; there's no
+  bulk CSV *export*)
 - The "Activity log" and "Admin & data" nav tabs
 - Favorites
-- Real "Send email" (via `MailApp`) in the share dialog, instead of just
-  "Copy"/"Open draft" — keeps the app's email quota from being usable by
-  every entered member
 
 Every admin-only action is enforced server-side (`requireAdmin_(token)` in
 Auth.gs), not just hidden in the UI — a request forged without a valid
@@ -128,7 +132,7 @@ partner audience does, not auditing the administrators themselves.
   square mark would turn it into a white square with black text instead of
   the intended look).
 - `Code.gs` — `doGet`, `include()`, and the `api_bootstrap` / `api_refresh`
-  / `api_sendEmail` endpoints. `api_bootstrap` returns only branding/
+  endpoints. `api_bootstrap` returns only branding/
   settings (enough to render the front gate) for a caller with no valid
   session — company/engagement/etc. data is withheld until `api_enter` (or
   `api_login`) has produced a token; `api_refresh` requires a valid session
@@ -332,17 +336,17 @@ allow-list for what's safe to send externally.
 
 ## Sharing policy (CLAUDE.md, carried forward)
 
-`downloadCompany`, `shareText` (email/copy), and CSV export all omit
+`downloadCompany` and `shareText` ("Copy"/"Open draft") both omit
 **account owner**, **edge-case flags**, and **"where things stand now"**
-— per the project rule in `project/CLAUDE.md`. One correction made while
-porting: the prototype's **CSV export** still included "Where Things Stand
-Now" and "Account Owner (Salesforce)" columns, which is inconsistent with
-that rule (CLAUDE.md says "ANY... share exports"); this build removes them
-from CSV export too. Everything else (classifications + reasoning, the six
-dimensions, board members, POC, international context, sources) is
-unchanged and still shown/shared as before. Edge-case flags are still shown
-*inside the app* (the detail card) — the rule is about outbound sharing,
-not in-app visibility for signed-in staff.
+— per the project rule in `project/CLAUDE.md`. (The prototype's bulk CSV
+export used to need the same correction — it still included "Where Things
+Stand Now" and "Account Owner (Salesforce)" columns — but bulk CSV export
+has since been removed from this build entirely; see Known gaps.)
+Everything else (classifications + reasoning, the six dimensions, board
+members, POC, international context, sources) is unchanged and still
+shown/shared as before. Edge-case flags are still shown *inside the app*
+(the detail card) — the rule is about outbound sharing, not in-app
+visibility for signed-in staff.
 
 ## Known gaps / next steps
 
@@ -366,10 +370,18 @@ not in-app visibility for signed-in staff.
   closing it means threading a token through each of those functions
   directly instead of only through their `api_*` callers — flag it if you
   want that done.
-- **Email quota:** `MailApp.sendEmail` is capped at 100/day (consumer) or
-  1,500/day (Google Workspace). Fine for this tool's volume; if O@W ever
-  needs more, swap `api_sendEmail` in `Code.gs` for `GmailApp` (higher quota
-  on Workspace) or a transactional provider.
+- **No server-side email send, and no bulk CSV export:** earlier versions
+  of this build had a real "Send email" button (`api_sendEmail` in
+  `Code.gs`, via `MailApp`) and a portfolio-wide "Export CSV" button.
+  Both were removed at O@W's request — there's no actual email-sending
+  connection set up for this deployment, and visitor-facing bulk export
+  wasn't wanted (a company can still be downloaded individually via
+  `downloadCompany`). Sharing is "Copy" or "Open draft" (a `mailto:` link)
+  only now, both entirely client-side. If a real send connection is ever
+  set up, `MailApp.sendEmail` (capped at 100/day consumer, 1,500/day
+  Google Workspace) or `GmailApp`/a transactional provider are the options
+  — but don't reintroduce it without being asked; it was pulled
+  deliberately, not because setting it up failed.
 - **Session length:** sessions live in `CacheService`, capped at Google's 6h
   max (`SESSION_TTL_SECONDS` in `Config.gs`). Administrators re-enter their
   email + password after 6 hours idle. If that's too short, the next

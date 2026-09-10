@@ -80,12 +80,12 @@
         companies: [], engagement: [], definitions: [], resources: null,
         stages: [], categoryKeys: [],
         view: 'cards', q: '', membership: 'all', industryFilter: 'all',
-        stageFilter: {}, sort: { key: 'company', dir: 1 },
+        stageFilter: {}, sort: { key: 'company', dir: 1 }, stageChartType: 'bar',
         selectedId: null, editing: null, isNew: false, toast: '',
         selected: {}, shareOpen: false, shareTo: '', shareMsg: '', shareDetail: 'summary',
         page: 'journey', engQ: '', engSort: { key: 'total', dir: -1 }, engExpanded: {},
         auth: null, admins: [], activity: [],
-        favorites: {}, showFav: false, sending: false,
+        favorites: {}, showFav: false,
         settings: { title: 'Skills-First Journey Tracker', accent: '#8c4799' },
         loginEmail: '', loginPass: '', naName: '', naEmail: '', naPass: '', dataText: '',
         memberName: '', memberEmail: '',
@@ -233,20 +233,10 @@
       this.setState({ favorites: f });
       google.script.run.withFailureHandler(() => {}).withSuccessHandler(res => this.setState({ favorites: res.favorites })).api_toggleFavorite(this.token, id);
     }
-    sendEmail() {
-      const { rows, body } = this.shareText(this.state.shareDetail);
-      if (!rows.length) return;
-      const to = (this.state.shareTo || '').trim();
-      if (!to) { this.flash('Enter a recipient email address'); return; }
-      const msg = this.state.shareMsg.trim();
-      const subject = 'Skills-first journey — ' + rows.length + (rows.length === 1 ? ' company' : ' companies');
-      const text = (msg ? msg + '\n\n' : '') + body;
-      this.setState({ sending: true });
-      google.script.run
-        .withSuccessHandler(() => { this.setState({ sending: false, shareOpen: false, selected: {} }); this.flash('Email sent to ' + to); })
-        .withFailureHandler(err => { this.setState({ sending: false }); this.flash('Send failed (' + ((err && err.message) || err) + ') — opening a draft instead'); this.openEmail(); })
-        .api_sendEmail(this.token, to, subject, text);
-    }
+    // Real server-side email send (api_sendEmail/MailApp) was removed —
+    // this app has no actual send connection set up, so "Send email" was
+    // misleading. Sharing is "Copy" or "Open draft" (openEmail, below)
+    // only, both entirely client-side.
     // ---------- entry gate (domain-restricted, no password) ----------
     doEnter() {
       const { memberName, memberEmail } = this.state;
@@ -442,40 +432,11 @@
         .api_deleteCompany(this.token, id);
     }
 
-    // ---------- CSV (export always excludes internal-only fields per CLAUDE.md) ----------
-    csvCols() {
-      const base = [
-        ['Company', c => c.company], ['Logo', c => c.logo],
-        ['TTPC Partner', c => c.ttpc ? 'Yes' : 'No'], ['Ad Council Board Member', c => c.adCouncil ? 'Yes' : 'No'],
-        ["What We've Done Together", c => c.doneTogether],
-        ['Priority Account', c => c.top10 ? 'Yes' : 'No'], ['Priority Account Notes', c => c.top10Notes],
-        ['Points of Contact', c => (c.pointsOfContact || []).map(p => p.name + (p.title ? ' (' + p.title + ')' : '')).join(' | ')],
-        ['Engagement Ideas', c => (c.engagementIdeas || []).join(' | ')],
-        ['Last Change Direction', c => c.lastChangeDirection], ['Last Reassessed', c => c.lastReassessed], ['Latest Change Summary', c => c.latestChangeSummary],
-        ['Overall Journey Classification', c => c.overall], ['Overall Classification Reasoning', c => c.overallWhy],
-      ];
-      const cat = [];
-      this.CATS.forEach(k => {
-        cat.push([k.label + ' — Classification', c => (c.categories[k.key] || {}).cls || '']);
-        cat.push([k.label + ' — Reasoning', c => (c.categories[k.key] || {}).why || '']);
-      });
-      const tail = [
-        ['International Context', c => c.international], ['Assessment Date', c => c.assessmentDate],
-      ];
-      const src = [];
-      for (let i = 1; i <= 17; i++) src.push(['Source Link ' + i, c => (c.sources || [])[i - 1] || '']);
-      return base.concat(cat, tail, src);
-    }
-    exportCSV() {
-      const cols = this.csvCols();
-      const esc = v => { v = (v == null ? '' : String(v)); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-      const rows = [cols.map(c => esc(c[0])).join(',')];
-      this.filtered().forEach(c => rows.push(cols.map(col => esc(col[1](c))).join(',')));
-      const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = 'skills-first-journey.csv'; a.click();
-      this.flash('Exported ' + this.filtered().length + ' companies to CSV');
-    }
+    // Bulk CSV export was removed — company detail is only downloadable
+    // one at a time (downloadCompany, below), not as a portfolio-wide
+    // export. Admin CSV *import* (parseCSV/importCSV) is unrelated and
+    // stays — that's a data-entry tool for administrators, not a
+    // visitor-facing download.
     parseCSV(text) {
       const rows = []; let row = [], cur = '', q = false;
       for (let i = 0; i < text.length; i++) {
@@ -637,34 +598,81 @@
           h('p', { className: 'u-text-style-large u-mt-4 u-text-wrap-pretty', style: { maxWidth: '56ch' } },
             'Track, filter, and compare the skills-first progress of Tear the Paper Ceiling Coalition partners and Ad Council board companies across six dimensions — then select any set to share by email.')));
 
+      // Shared segmented-control + <select> helpers — used by the dashboard
+      // chart controls below and the directory's own controls further down.
+      const seg = (val, cur, on, label) => h('button', { key: val, onClick: on, style: { border: 'none', cursor: 'pointer', padding: '.5rem 1rem', borderRadius: '100vw', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, background: cur ? '#0f153b' : 'transparent', color: cur ? '#fff' : '#0f153b' } }, label);
+      const segGroup = children => h('div', { style: { display: 'inline-flex', gap: '.25rem', padding: '.25rem', background: '#f0f0ee', borderRadius: '100vw' } }, children);
+      const selectStyle = { padding: '.6rem 1rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.15)', fontFamily: 'inherit', fontSize: '.85rem', background: '#fff', cursor: 'pointer', maxWidth: '14rem' };
+
       // ---- KPIs ----
       const kpi = (value, label, color) => h('div', { className: 'card', style: { padding: '1.5rem', background: '#fff' } },
         h('div', { className: 'u-text-style-h3 u-weight-medium', style: { color: color || '#0f153b', lineHeight: 1 } }, value),
         h('div', { className: 'u-text-style-small u-color-faded', style: { marginTop: '.4rem' } }, label));
-      const count = s => companies.filter(c => c.overall === s).length;
       const kpis = h('div', { className: 'u-grid-column-4', style: { marginTop: '2rem' } },
         kpi(companies.length, 'Companies tracked'),
         kpi(companies.filter(c => c.overall).length, 'Assessed on the journey', '#8c4799'),
         kpi(companies.filter(c => c.ttpc).length, 'TTPC Coalition partners', '#8c4799'),
         kpi(companies.filter(c => c.adCouncil).length, 'Ad Council board companies', '#e87722'));
 
+      // Both dashboard charts count the CURRENTLY FILTERED set (list, from
+      // this.filtered() — same membership/industry/stage/search filters the
+      // directory below uses), not every company, so the filter bar here
+      // actually changes what's plotted. KPIs above stay whole-portfolio on
+      // purpose (they're the "how big is this program" summary, not a
+      // filtered view).
+      const chartFilterBar = h('div', { style: { display: 'flex', gap: '.6rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.5rem' } },
+        h('span', { className: 'u-text-style-small u-color-faded' }, 'Filter these charts:'),
+        h('select', { value: st.membership, onChange: e => this.setState({ membership: e.target.value }), style: selectStyle },
+          h('option', { value: 'all' }, 'All memberships'), h('option', { value: 'ttpc' }, 'TTPC partners'), h('option', { value: 'adcouncil' }, 'Ad Council board')),
+        h('select', { value: st.industryFilter, onChange: e => this.setState({ industryFilter: e.target.value }), style: selectStyle },
+          [h('option', { key: 'all', value: 'all' }, 'All industries')].concat(this.industries().map(o => h('option', { key: o, value: o }, o)))),
+        (st.membership !== 'all' || st.industryFilter !== 'all') ? h('button', { onClick: () => this.setState({ membership: 'all', industryFilter: 'all' }), style: { cursor: 'pointer', background: 'none', border: 'none', color: '#8c4799', fontFamily: 'inherit', fontSize: '.85rem', textDecoration: 'underline' } }, 'Clear') : null);
+
+      const count = s => list.filter(c => c.overall === s).length;
       const maxStage = Math.max(1, ...this.STAGES.map(count));
+      const barRows = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.85rem' } },
+        this.STAGES.slice().reverse().map(s => h('div', { key: s, style: { display: 'flex', alignItems: 'center', gap: '.9rem' } },
+          h('div', { style: { width: '8rem', flex: '0 0 auto', fontSize: '.82rem', color: '#0f153b' } }, this.stageShort(s)),
+          h('div', { style: { flex: 1, background: '#f0f0ee', borderRadius: '100vw', height: '1.4rem', overflow: 'hidden' } },
+            h('div', { style: { width: (count(s) / maxStage * 100) + '%', minWidth: count(s) ? '1.4rem' : 0, height: '100%', background: this.stageColor(s), borderRadius: '100vw' } })),
+          h('div', { style: { width: '2rem', textAlign: 'right', fontWeight: 600, fontSize: '.9rem' } }, count(s)))));
+
+      // ---- Circle (donut) alternative to the bar chart above ----
+      const donutSize = 180, donutR = 62, donutStroke = 26;
+      const circumference = 2 * Math.PI * donutR;
+      const stageTotal = this.STAGES.reduce((s, x) => s + count(x), 0);
+      let donutAcc = 0;
+      const donutSegs = this.STAGES.map(s => {
+        const frac = stageTotal ? count(s) / stageTotal : 0;
+        const dash = frac * circumference;
+        const el = frac ? h('circle', { key: s, cx: donutSize / 2, cy: donutSize / 2, r: donutR, fill: 'none', stroke: this.stageColor(s), strokeWidth: donutStroke, strokeDasharray: dash + ' ' + (circumference - dash), strokeDashoffset: -donutAcc * circumference, transform: 'rotate(-90 ' + donutSize / 2 + ' ' + donutSize / 2 + ')' }) : null;
+        donutAcc += frac;
+        return el;
+      });
+      const donutChart = h('div', { style: { display: 'flex', gap: '1.75rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', padding: '.5rem 0' } },
+        h('svg', { width: donutSize, height: donutSize, viewBox: '0 0 ' + donutSize + ' ' + donutSize, style: { flex: '0 0 auto' } },
+          h('circle', { cx: donutSize / 2, cy: donutSize / 2, r: donutR, fill: 'none', stroke: '#f0f0ee', strokeWidth: donutStroke }),
+          donutSegs,
+          h('text', { x: donutSize / 2, y: donutSize / 2, textAnchor: 'middle', dominantBaseline: 'central', style: { fontSize: '1.5rem', fontWeight: 600, fill: '#0f153b' } }, stageTotal)),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.55rem' } },
+          this.STAGES.slice().reverse().map(s => h('div', { key: s, style: { display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.82rem' } },
+            h('span', { style: { width: '.7rem', height: '.7rem', borderRadius: '2px', background: this.stageColor(s), flex: '0 0 auto' } }),
+            h('span', { style: { color: '#0f153b' } }, this.stageShort(s)),
+            h('span', { style: { color: '#6b6f80', marginLeft: '1.25rem', fontWeight: 600 } }, count(s))))));
+
       const stageChart = h('div', { className: 'card', style: { padding: '1.75rem', background: '#fff' } },
-        h('div', { className: 'u-text-style-small u-weight-semi-bold', style: { marginBottom: '1.1rem' } }, 'Overall journey classification'),
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.85rem' } },
-          this.STAGES.slice().reverse().map(s => h('div', { key: s, style: { display: 'flex', alignItems: 'center', gap: '.9rem' } },
-            h('div', { style: { width: '8rem', flex: '0 0 auto', fontSize: '.82rem', color: '#0f153b' } }, this.stageShort(s)),
-            h('div', { style: { flex: 1, background: '#f0f0ee', borderRadius: '100vw', height: '1.4rem', overflow: 'hidden' } },
-              h('div', { style: { width: (count(s) / maxStage * 100) + '%', minWidth: count(s) ? '1.4rem' : 0, height: '100%', background: this.stageColor(s), borderRadius: '100vw' } })),
-            h('div', { style: { width: '2rem', textAlign: 'right', fontWeight: 600, fontSize: '.9rem' } }, count(s))))));
+        h('div', { className: 'u-hflex-between-center', style: { marginBottom: '1.1rem', flexWrap: 'wrap', gap: '.5rem' } },
+          h('div', { className: 'u-text-style-small u-weight-semi-bold' }, 'Overall journey classification'),
+          segGroup([seg('bar', st.stageChartType !== 'circle', () => this.setState({ stageChartType: 'bar' }), 'Bar'), seg('circle', st.stageChartType === 'circle', () => this.setState({ stageChartType: 'circle' }), 'Circle')])),
+        st.stageChartType === 'circle' ? donutChart : barRows);
 
       const catRow = k => {
-        const total = companies.filter(c => c.overall).length || 1;
-        const segs = this.STAGES.map(s => ({ s, n: companies.filter(c => (c.categories[k.key] || {}).cls === s).length }));
+        const total = list.filter(c => c.overall).length || 1;
+        const segs = this.STAGES.map(s => ({ s, n: list.filter(c => (c.categories[k.key] || {}).cls === s).length }));
         return h('div', { key: k.key, style: { display: 'flex', alignItems: 'center', gap: '.9rem' } },
           h('div', { style: { width: '13rem', flex: '0 0 auto', fontSize: '.82rem', color: '#0f153b' } }, k.label),
           h('div', { style: { flex: 1, display: 'flex', height: '1.25rem', borderRadius: '100vw', overflow: 'hidden', background: '#f0f0ee' } },
-            segs.map(seg => seg.n ? h('div', { key: seg.s, title: this.stageShort(seg.s) + ': ' + seg.n, style: { width: (seg.n / total * 100) + '%', background: this.stageColor(seg.s) } }) : null)));
+            segs.map(sg => sg.n ? h('div', { key: sg.s, title: this.stageShort(sg.s) + ': ' + sg.n, style: { width: (sg.n / total * 100) + '%', background: this.stageColor(sg.s) } }) : null)));
       };
       const catChart = h('div', { className: 'card', style: { padding: '1.75rem', background: '#fff' } },
         h('div', { className: 'u-hflex-between-center', style: { marginBottom: '1.1rem', flexWrap: 'wrap', gap: '.5rem' } },
@@ -675,18 +683,15 @@
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.7rem' } }, this.CATS.map(catRow)));
 
       const dashboard = h('section', { className: 'section u-theme-light-2', style: { paddingTop: '2.5rem', paddingBottom: '3rem' } },
-        h('div', { className: 'u-container' }, kpis,
+        h('div', { className: 'u-container' }, kpis, chartFilterBar,
           h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1.25fr', gap: '1.5rem', marginTop: '1.5rem', alignItems: 'start' } }, stageChart, catChart)));
 
       // ---- CONTROLS ----
-      const seg = (val, cur, on, label) => h('button', { key: val, onClick: on, style: { border: 'none', cursor: 'pointer', padding: '.5rem 1rem', borderRadius: '100vw', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, background: cur ? '#0f153b' : 'transparent', color: cur ? '#fff' : '#0f153b' } }, label);
-      const segGroup = children => h('div', { style: { display: 'inline-flex', gap: '.25rem', padding: '.25rem', background: '#f0f0ee', borderRadius: '100vw' } }, children);
       const actionBtn = (label, on, primary) => h('button', {
         onClick: on, style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 500, padding: '.55rem 1.1rem', borderRadius: '100vw', border: '1.5px solid ' + (primary ? ACC : 'rgba(28,28,28,.2)'), background: primary ? ACC : '#fff', color: primary ? '#fff' : '#0f153b', transition: 'background .2s,border-color .2s,color .2s', whiteSpace: 'nowrap' },
         onMouseEnter: e => { if (primary) { e.currentTarget.style.background = '#0f153b'; e.currentTarget.style.borderColor = '#0f153b'; } else e.currentTarget.style.borderColor = ACC; },
         onMouseLeave: e => { if (primary) { e.currentTarget.style.background = ACC; e.currentTarget.style.borderColor = ACC; } else e.currentTarget.style.borderColor = 'rgba(28,28,28,.2)'; },
       }, label);
-      const selectStyle = { padding: '.6rem 1rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.15)', fontFamily: 'inherit', fontSize: '.85rem', background: '#fff', cursor: 'pointer', maxWidth: '14rem' };
 
       const stageFilterChips = h('div', { style: { display: 'flex', gap: '.4rem', flexWrap: 'wrap' } },
         this.STAGES.concat(['__none']).map(s => { const active = !!st.stageFilter[s]; const col = s === '__none' ? '#9aa0b4' : this.stageColor(s); const label = s === '__none' ? 'Not yet assessed' : this.stageShort(s);
@@ -703,8 +708,7 @@
             h('select', { value: st.industryFilter, onChange: e => this.setState({ industryFilter: e.target.value }), style: selectStyle }, [h('option', { key: 'all', value: 'all' }, 'All industries')].concat(this.industries().map(o => h('option', { key: o, value: o }, o))))),
           h('div', { style: { display: 'flex', gap: '.6rem', flexWrap: 'wrap' } },
             isAdmin ? actionBtn('+ Add company', () => this.startAdd(), true) : null,
-            isAdmin ? actionBtn('Import CSV', () => this.fileRef.current && this.fileRef.current.click()) : null,
-            actionBtn('Export CSV', () => { this.track('Exported CSV', this.filtered().length + ' companies'); this.exportCSV(); }))),
+            isAdmin ? actionBtn('Import CSV', () => this.fileRef.current && this.fileRef.current.click()) : null)),
         h('div', { className: 'u-hflex-between-center', style: { gap: '1rem', flexWrap: 'wrap' } },
           stageFilterChips,
           h('div', { style: { display: 'flex', gap: '1rem', alignItems: 'center' } },
@@ -961,11 +965,10 @@
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: '.6rem' } }, lbl('How much detail?'),
               radio('summary', 'Summary', 'Classification, membership, and dimension summary for each company.'),
               radio('full', 'Full detail', 'Adds the full reasoning across all six dimensions plus source links.')),
-            h('div', { style: { fontSize: '.78rem', color: '#6b6f80', background: '#f9f9f7', borderRadius: '.6rem', padding: '.7rem .9rem' } }, (isAdmin ? '"Send email" delivers straight from the app (via Apps Script) to the address above. ' : '') + '"Open draft" opens it in your own email client instead. Neither includes account owner, edge-case flags, or "where things stand now" — those stay internal.')),
+            h('div', { style: { fontSize: '.78rem', color: '#6b6f80', background: '#f9f9f7', borderRadius: '.6rem', padding: '.7rem .9rem' } }, '"Open draft" opens it in your own email client — this app has no way to send email directly. Neither "Copy" nor "Open draft" includes account owner, edge-case flags, or "where things stand now" — those stay internal.')),
           h('div', { style: { padding: '1.25rem 1.75rem', borderTop: '1.5px solid rgba(28,28,28,.1)', display: 'flex', justifyContent: 'flex-end', gap: '.6rem', flexWrap: 'wrap' } },
             h('button', { onClick: () => this.copyShare(), style: { cursor: 'pointer', fontFamily: 'inherit', fontSize: '.88rem', fontWeight: 500, padding: '.6rem 1.25rem', borderRadius: '100vw', border: '1.5px solid rgba(28,28,28,.2)', background: '#fff', color: '#0f153b' } }, 'Copy'),
-            actionBtn('Open draft', () => this.openEmail()),
-            isAdmin ? actionBtn(st.sending ? 'Sending…' : 'Send email', () => this.sendEmail(), true) : null)) ) : null;
+            actionBtn('Open draft', () => this.openEmail(), true))) ) : null;
 
       const toast = st.toast ? h('div', { className: 'sfj-fade', style: { position: 'fixed', bottom: selIds.length ? '5rem' : '1.5rem', left: '50%', transform: 'translateX(-50%)', zIndex: 60, background: '#8c4799', color: '#fff', padding: '.75rem 1.5rem', borderRadius: '100vw', fontSize: '.88rem', boxShadow: '0 8px 30px rgba(0,0,0,.25)' } }, st.toast) : null;
       const hiddenFile = h('input', { ref: this.fileRef, type: 'file', accept: '.csv,text/csv', style: { display: 'none' }, onChange: ev => { const f = ev.target.files[0]; if (f) this.importCSV(f); ev.target.value = ''; } });
@@ -1017,7 +1020,6 @@
           adminCard('Appearance', h('div', { style: { display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.25rem', alignItems: 'start' } },
             h('div', null, L2('App title'), h('input', { value: st.settings.title, onChange: e => this.setSetting({ title: e.target.value }), style: inp2 })),
             h('div', null, L2('Accent color'), h('div', { style: { display: 'flex', gap: '.5rem' } }, ['#8c4799', '#0f153b', '#e87722', '#56adde', '#e03c32'].map(col => h('button', { key: col, onClick: () => { this.setSetting({ accent: col }); this.track('Changed accent color', col); }, 'aria-label': col, style: { width: '2.1rem', height: '2.1rem', borderRadius: '100vw', border: st.settings.accent === col ? '3px solid #0f153b' : '1.5px solid rgba(0,0,0,.12)', background: col, cursor: 'pointer' } })))))),
-          adminCard('Email sending', h('p', { style: { fontSize: '.85rem', color: '#6b6f80', margin: 0 } }, 'The "Send email" button in Share sends directly from this app via Apps Script (MailApp) — no setup required. It excludes account owner, edge-case flags, and "where things stand now" automatically, per the sharing policy in CLAUDE.md.')),
           adminCard('Data', h('div', null,
             h('p', { style: { fontSize: '.85rem', color: '#6b6f80', marginTop: 0 } }, 'Company data lives in the "' + 'Master Spreadsheet' + '" tab of the Google Sheet — every load reads it fresh, and every add/edit/delete/CSV-import writes straight back to it. Nothing is cached in the app or in this browser. Paste JSON below to bulk-upsert (matched to existing rows by company name).'),
             h('div', { style: { display: 'flex', gap: '.6rem', flexWrap: 'wrap', marginBottom: '.75rem' } },

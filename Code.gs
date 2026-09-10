@@ -1,8 +1,8 @@
 /**
- * Entry point + the handful of "read everything" / "send email" endpoints
- * that don't belong in a more specific file. Auth.gs / SheetData.gs /
- * Activity.gs / Settings.gs / Favorites.gs / Overrides.gs hold the rest of
- * the api_* functions the client calls via google.script.run.
+ * Entry point + the "read everything" endpoints that don't belong in a more
+ * specific file. Auth.gs / SheetData.gs / Activity.gs / Settings.gs /
+ * Favorites.gs / Overrides.gs hold the rest of the api_* functions the
+ * client calls via google.script.run.
  */
 
 function doGet(e) {
@@ -61,18 +61,9 @@ function api_refresh(token) {
   return { companies: readCompanies_(), engagement: readEngagement_() };
 }
 
-/**
- * Sends real email straight from Apps Script (MailApp) — no third-party
- * endpoint or configuration required. Subject to Apps Script's daily
- * MailApp quota (100/day on a consumer account, 1,500/day on Google
- * Workspace); the client falls back to "Open draft" (a client-side mailto
- * link) if this call errors, e.g. quota exhausted.
- */
-function api_sendEmail(token, to, subject, message) {
-  var auth = requireAuth_(token);
-  to = String(to || '').trim();
-  if (!to) throw new Error('Enter a recipient email address.');
-  MailApp.sendEmail({ to: to, subject: subject, body: message });
-  logActivity_(auth, 'Sent email', to);
-  return { ok: true };
-}
+// api_sendEmail (real server-side send via MailApp) was removed — this
+// deployment has no actual email-sending connection set up, so offering a
+// "Send email" button that silently depended on Apps Script's MailApp
+// quota was misleading. Sharing a company now only ever happens
+// client-side: "Copy" or "Open draft" (a mailto: link), both in
+// JavaScript.html, neither of which touches the server at all.
